@@ -54,7 +54,9 @@ const COLORS = ['#4f46e5', '#f97316'];
 export default function Dashboard() {
   const { user } = useAuth();
   
-  // Calculate 30 days ago for the trend chart
+  // Calculate 30-day range for the trend chart
+  const today = new Date();
+  const endDateStr = today.toISOString().split('T')[0];
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const startDateStr = thirtyDaysAgo.toISOString().split('T')[0];
@@ -63,7 +65,8 @@ export default function Dashboard() {
   const { data: summary, isLoading: isLoadingSummary } = useReportsSummary();
   const { data: trendData, isLoading: isLoadingTrend } = useReportsSalesTrend({ 
     period: 'daily',
-    start_date: startDateStr
+    start_date: startDateStr,
+    end_date: endDateStr
   });
   const { data: topProducts, isLoading: isLoadingTop } = useTopProducts({ limit: 4 });
   const { data: techPerformance, isLoading: isLoadingTech } = useTechnicianPerformance();
