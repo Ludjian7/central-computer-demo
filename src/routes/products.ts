@@ -5,35 +5,63 @@ import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 export const productsRouter = Router();
 
 // GET /api/products - Daftar produk aktif (semua role)
-productsRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
+productsRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { type, category, low_stock, q } = req.query;
 
   try {
-    let query = 'SELECT * FROM products WHERE is_active = 1';
-    const params: any[] = [];
+    const where: any = { isActive: true };
 
     if (type === 'physical' || type === 'service') {
-      query += ' AND type = ?';
-      params.push(type);
+      where.type = type;
     }
 
     if (category) {
-      query += ' AND category = ?';
-      params.push(category);
+      where.category = category as string;
     }
 
     if (low_stock === 'true') {
-      query += " AND type = 'physical' AND quantity <= min_quantity";
+      where.type = 'physical';
+      where.quantity = { lte: { name: 'minQuantity' } }; // This is complex in prisma, better use raw for this one or refine
     }
 
-    if (q) {
-      query += ' AND (name LIKE ? OR sku LIKE ?)';
-      params.push(`%${q}%`, `%${q}%`);
+    // Since the original has complex logic, let's use Prisma findMany for simple filters
+    // and fallback to raw if needed. For now, let's refactor to standard Prisma for better reliability.
+    
+    let products;
+    if (low_stock === 'true' || q) {
+      // Fallback to raw for complex search/comparisons for speed in migration
+      let query = 'SELECT * FROM products WHERE is_active = true';
+      const params: any[] = [];
+      let paramCount = 1;
+
+      if (type === 'physical' || type === 'service') {
+        query += ` AND type = $${paramCount++}`;
+        params.push(type);
+      }
+
+      if (category) {
+        query += ` AND category = $${paramCount++}`;
+        params.push(category);
+      }
+
+      if (low_stock === 'true') {
+        query += " AND type = 'physical' AND quantity <= min_quantity";
+      }
+
+      if (q) {
+        query += ` AND (name ILIKE $${paramCount} OR sku ILIKE $${paramCount})`;
+        params.push(`%${q}%`);
+      }
+
+      query += ' ORDER BY name ASC';
+      products = await (db as any).$queryRawUnsafe(query, ...params);
+    } else {
+      products = await (db as any).product.findMany({
+        where,
+        orderBy: { name: 'asc' }
+      });
     }
 
-    query += ' ORDER BY name ASC';
-
-    const products = db.prepare(query).all(...params);
     res.json({ status: 'success', data: products, message: 'Daftar produk berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -42,17 +70,17 @@ productsRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/products/low-stock - Produk stok menipis dengan info supplier
-productsRouter.get('/low-stock', authMiddleware, (req: AuthRequest, res: Response) => {
+productsRouter.get('/low-stock', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const products = db.prepare(`
+    const products = await (db as any).$queryRawUnsafe(`
       SELECT p.*, s.name as supplier_name
       FROM products p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
       WHERE p.type = 'physical' 
         AND p.quantity <= p.min_quantity 
-        AND p.is_active = 1
+        AND p.is_active = true
       ORDER BY p.quantity ASC
-    `).all();
+    `);
     
     res.json({ status: 'success', data: products, message: 'Daftar stok menipis berhasil diambil' });
   } catch (error) {
@@ -62,7 +90,7 @@ productsRouter.get('/low-stock', authMiddleware, (req: AuthRequest, res: Respons
 });
 
 // POST /api/products - Tambah produk (admin)
-productsRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+productsRouter.post('/', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { name, description, type, sku, barcode, price, cost, quantity, min_quantity, category, brand, location, duration_minutes, service_details, supplier_id } = req.body;
 
   if (!name || !type || !sku || price === undefined || !category) {
@@ -77,28 +105,33 @@ productsRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthRequest
 
   try {
     // Cek SKU unik
-    const existingSku = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku);
+    const existingSku = await (db as any).product.findUnique({ where: { sku } });
     if (existingSku) {
       res.status(400).json({ status: 'error', code: 'DUPLICATE_SKU', message: 'SKU sudah digunakan' });
       return;
     }
 
-    const stmt = db.prepare(`
-      INSERT INTO products (name, description, type, sku, barcode, price, cost, quantity, min_quantity, category, brand, location, duration_minutes, service_details, supplier_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const product = await (db as any).product.create({
+      data: {
+        name,
+        description: description || null,
+        type,
+        sku,
+        barcode: barcode || null,
+        price: Number(price),
+        cost: Number(cost || 0),
+        quantity: type === 'physical' ? Number(quantity || 0) : 0,
+        minQuantity: type === 'physical' ? Number(min_quantity || 2) : 2,
+        category,
+        brand: brand || null,
+        location: location || null,
+        durationMinutes: type === 'service' ? Number(duration_minutes || null) : null,
+        serviceDetails: type === 'service' ? (service_details || null) : null,
+        supplierId: supplier_id || null
+      }
+    });
 
-    const info = stmt.run(
-      name, description || null, type, sku, barcode || null, price, cost || 0,
-      type === 'physical' ? (quantity || 0) : 0,
-      type === 'physical' ? (min_quantity || 2) : 2,
-      category, brand || null, location || null,
-      type === 'service' ? (duration_minutes || null) : null,
-      type === 'service' ? (service_details || null) : null,
-      supplier_id || null
-    );
-
-    res.status(201).json({ status: 'success', data: { id: info.lastInsertRowid }, message: 'Produk berhasil ditambahkan' });
+    res.status(201).json({ status: 'success', data: { id: product.id }, message: 'Produk berhasil ditambahkan' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -106,11 +139,14 @@ productsRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthRequest
 });
 
 // GET /api/products/:id - Detail produk
-productsRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+productsRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const product = db.prepare('SELECT * FROM products WHERE id = ? AND is_active = 1').get(id);
+    const product = await (db as any).product.findFirst({ 
+      where: { id: parseInt(id), isActive: true } 
+    });
+    
     if (!product) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
       return;
@@ -123,7 +159,7 @@ productsRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => 
 });
 
 // PUT /api/products/:id - Update produk (admin)
-productsRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+productsRouter.put('/:id', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { name, description, type, barcode, price, cost, quantity, min_quantity, category, brand, location, duration_minutes, service_details, supplier_id } = req.body;
 
@@ -133,24 +169,27 @@ productsRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthReque
   }
 
   try {
-    const stmt = db.prepare(`
-      UPDATE products 
-      SET name = ?, description = ?, type = ?, barcode = ?, price = ?, cost = ?, quantity = ?, min_quantity = ?, category = ?, brand = ?, location = ?, duration_minutes = ?, service_details = ?, supplier_id = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND is_active = 1
-    `);
+    const product = await (db as any).product.updateMany({
+      where: { id: parseInt(id), isActive: true },
+      data: {
+        name,
+        description: description || null,
+        type,
+        barcode: barcode || null,
+        price: Number(price),
+        cost: Number(cost || 0),
+        quantity: type === 'physical' ? Number(quantity || 0) : 0,
+        minQuantity: type === 'physical' ? Number(min_quantity || 2) : 2,
+        category,
+        brand: brand || null,
+        location: location || null,
+        durationMinutes: type === 'service' ? Number(duration_minutes || null) : null,
+        serviceDetails: type === 'service' ? (service_details || null) : null,
+        supplierId: supplier_id || null
+      }
+    });
 
-    const info = stmt.run(
-      name, description || null, type, barcode || null, price, cost || 0,
-      type === 'physical' ? (quantity || 0) : 0,
-      type === 'physical' ? (min_quantity || 2) : 2,
-      category, brand || null, location || null,
-      type === 'service' ? (duration_minutes || null) : null,
-      type === 'service' ? (service_details || null) : null,
-      supplier_id || null,
-      id
-    );
-
-    if (info.changes === 0) {
+    if (product.count === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
       return;
     }
@@ -163,17 +202,19 @@ productsRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthReque
 });
 
 // PATCH /api/products/:id/deactivate - Nonaktifkan (admin)
-productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
     // Cek apakah ada sale_items dengan service_status in_progress atau scheduled
-    const activeServices = db.prepare(`
-      SELECT COUNT(*) as count FROM sale_items 
-      WHERE product_id = ? AND service_status IN ('scheduled', 'in_progress')
-    `).get(id) as { count: number };
+    const activeServicesCount = await (db as any).saleItem.count({
+      where: {
+        productId: parseInt(id),
+        serviceStatus: { in: ['scheduled', 'in_progress'] }
+      }
+    });
 
-    if (activeServices.count > 0) {
+    if (activeServicesCount > 0) {
       res.status(400).json({ 
         status: 'error', 
         code: 'BAD_REQUEST', 
@@ -182,9 +223,12 @@ productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), (r
       return;
     }
 
-    const info = db.prepare('UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+    const info = await (db as any).product.updateMany({
+      where: { id: parseInt(id) },
+      data: { isActive: false }
+    });
     
-    if (info.changes === 0) {
+    if (info.count === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
       return;
     }
@@ -197,7 +241,7 @@ productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), (r
 });
 
 // POST /api/products/:id/restock - Tambah stok (admin)
-productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { quantity, supplier_id, notes } = req.body;
   const userId = req.user?.id;
@@ -208,7 +252,10 @@ productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), (req: 
   }
 
   try {
-    const product = db.prepare('SELECT type, quantity FROM products WHERE id = ? AND is_active = 1').get(id) as any;
+    const product = await (db as any).product.findFirst({
+      where: { id: parseInt(id), isActive: true },
+      select: { type: true, quantity: true }
+    });
     
     if (!product) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
@@ -222,19 +269,27 @@ productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), (req: 
 
     const newBalance = product.quantity + quantity;
 
-    // Gunakan transaksi untuk memastikan atomicity
-    const restockTransaction = db.transaction(() => {
+    // Use Prisma transaction
+    await (db as any).$transaction(async (tx: any) => {
       // 1. Update quantity di tabel products
-      db.prepare('UPDATE products SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newBalance, id);
+      await tx.product.update({
+        where: { id: parseInt(id) },
+        data: { quantity: newBalance }
+      });
       
       // 2. Insert ke stock_logs
-      db.prepare(`
-        INSERT INTO stock_logs (product_id, type, quantity, balance, supplier_id, notes, user_id)
-        VALUES (?, 'in', ?, ?, ?, ?, ?)
-      `).run(id, quantity, newBalance, supplier_id || null, notes || null, userId);
+      await tx.stockLog.create({
+        data: {
+          productId: parseInt(id),
+          type: 'in',
+          quantity,
+          balance: newBalance,
+          supplierId: supplier_id || null,
+          notes: notes || null,
+          userId: userId!
+        }
+      });
     });
-
-    restockTransaction();
 
     res.json({ status: 'success', data: { balance: newBalance }, message: 'Stok berhasil ditambahkan' });
   } catch (error) {
@@ -244,18 +299,18 @@ productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), (req: 
 });
 
 // GET /api/products/:id/stock-log - Riwayat perubahan stok
-productsRouter.get('/:id/stock-log', authMiddleware, (req: AuthRequest, res: Response) => {
+productsRouter.get('/:id/stock-log', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const logs = db.prepare(`
+    const logs = await (db as any).$queryRawUnsafe(`
       SELECT sl.*, u.username, s.name as supplier_name 
       FROM stock_logs sl
       LEFT JOIN users u ON sl.user_id = u.id
       LEFT JOIN suppliers s ON sl.supplier_id = s.id
-      WHERE sl.product_id = ?
+      WHERE sl.product_id = $1
       ORDER BY sl.created_at DESC
-    `).all(id);
+    `, parseInt(id));
 
     res.json({ status: 'success', data: logs, message: 'Riwayat stok berhasil diambil' });
   } catch (error) {

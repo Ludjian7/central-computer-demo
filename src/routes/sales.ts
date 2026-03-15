@@ -5,7 +5,7 @@ import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 export const salesRouter = Router();
 
 // GET /api/sales - Daftar transaksi
-salesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
+salesRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { start_date, end_date, status, payment_method } = req.query;
 
   try {
@@ -34,7 +34,7 @@ salesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 
     query += ' ORDER BY s.created_at DESC';
 
-    const sales = db.prepare(query).all(...params);
+    const sales = await db.prepare(query).all(...params);
     res.json({ status: 'success', data: sales, message: 'Daftar transaksi berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -43,7 +43,7 @@ salesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/sales - Buat transaksi baru (Checkout POS)
-salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
+salesRouter.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const payload = req.body;
   const userId = req.user?.id;
 
@@ -54,7 +54,7 @@ salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
 
   try {
     // 0. Cek shift aktif (Wajib di POS)
-    const activeShift = db.prepare("SELECT id FROM cash_shifts WHERE user_id = ? AND status = 'open'").get(userId) as any;
+    const activeShift = await db.prepare("SELECT id FROM cash_shifts WHERE user_id = ? AND status = 'open'").get(userId) as any;
     if (!activeShift) {
       res.status(400).json({ status: 'error', code: 'SHIFT_REQUIRED', message: 'Anda harus membuka shift kasir terlebih dahulu' });
       return;
@@ -62,11 +62,13 @@ salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
 
     const shiftId = activeShift.id;
 
-    const createSaleTx = db.transaction((data, uId, sId) => {
+    // 4. Use Prisma transaction for checkout
+    const result = await (db as any).$transaction(async (tx: any) => {
       // 1. Generate Invoice Number (INV-YYYYMMDD-XXXX)
       const date = new Date();
       const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-      const lastSale = db.prepare("SELECT invoice_number FROM sales WHERE invoice_number LIKE ? ORDER BY id DESC LIMIT 1").get(`INV-${dateStr}-%`) as any;
+      const lastSales = await tx.$queryRawUnsafe("SELECT invoice_number FROM sales WHERE invoice_number LIKE $1 ORDER BY id DESC LIMIT 1", `INV-${dateStr}-%`);
+      const lastSale = (lastSales as any[])[0];
       
       let seq = 1;
       if (lastSale) {
@@ -77,17 +79,20 @@ salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
 
       // 2. Calculate totals and prepare items
       let subtotal = 0;
-      let totalDiscount = data.discount || 0;
-      let tax = data.tax || 0;
+      let totalDiscount = payload.discount || 0;
+      let tax = payload.tax || 0;
 
       const processedItems = [];
 
-      for (const item of data.items) {
+      for (const item of payload.items) {
         if (!item.product_id || !item.quantity || item.quantity <= 0) {
           throw new Error('Item produk tidak valid');
         }
 
-        const product = db.prepare("SELECT * FROM products WHERE id = ? AND is_active = 1").get(item.product_id) as any;
+        const product = await tx.product.findFirst({ 
+          where: { id: item.product_id, isActive: true } 
+        });
+
         if (!product) {
           throw new Error(`Produk dengan ID ${item.product_id} tidak ditemukan atau tidak aktif`);
         }
@@ -115,56 +120,77 @@ salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
       const total = subtotal + tax - totalDiscount;
 
       // 3. Insert Sale
-      const saleInsert = db.prepare(`
-        INSERT INTO sales (invoice_number, customer_name, customer_phone, customer_email, subtotal, tax, discount, total, payment_method, payment_status, notes, user_id, discount_id, shift_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        invoiceNumber, data.customer_name, data.customer_phone || null, data.customer_email || null, 
-        subtotal, tax, totalDiscount, total, data.payment_method, data.payment_status || 'paid', 
-        data.notes || null, uId, data.discount_id || null, sId
-      );
-
-      const saleId = saleInsert.lastInsertRowid;
+      const sale = await tx.sale.create({
+        data: {
+          invoiceNumber,
+          customerName: payload.customer_name,
+          customerPhone: payload.customer_phone || null,
+          customerEmail: payload.customer_email || null,
+          subtotal,
+          tax,
+          discount: totalDiscount,
+          total,
+          paymentMethod: payload.payment_method,
+          paymentStatus: payload.payment_status || 'paid',
+          notes: payload.notes || null,
+          userId: userId!,
+          discountId: payload.discount_id || null,
+          shiftId: shiftId
+        }
+      });
 
       // 4. Insert Items & Update Stock
-      const itemInsert = db.prepare(`
-        INSERT INTO sale_items (sale_id, product_id, quantity, price, discount, subtotal, product_name, product_sku, unit_cost, service_schedule, service_status, service_technician, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      const stockUpdate = db.prepare(`UPDATE products SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
-      const stockLogInsert = db.prepare(`
-        INSERT INTO stock_logs (product_id, type, quantity, balance, sale_id, notes, user_id)
-        VALUES (?, 'out', ?, ?, ?, ?, ?)
-      `);
-
       for (const item of processedItems) {
-        itemInsert.run(
-          saleId, item.product_id, item.quantity, item.price, item.discount || 0, item.itemSubtotal,
-          item.product_name, item.product_sku, item.unit_cost,
-          item.type === 'service' ? (item.service_schedule || null) : null,
-          item.type === 'service' ? (item.service_status || 'scheduled') : null,
-          item.type === 'service' ? (item.service_technician || null) : null,
-          item.notes || null
-        );
+        await tx.saleItem.create({
+          data: {
+            saleId: sale.id,
+            productId: item.product_id,
+            quantity: item.quantity,
+            price: item.price,
+            discount: item.discount || 0,
+            subtotal: item.itemSubtotal,
+            productName: item.product_name,
+            productSku: item.product_sku,
+            unitCost: item.unit_cost,
+            serviceSchedule: item.type === 'service' ? (item.service_schedule ? new Date(item.service_schedule) : null) : null,
+            serviceStatus: item.type === 'service' ? (item.service_status || 'scheduled') : null,
+            serviceTechnician: item.type === 'service' ? (item.service_technician || null) : null,
+            notes: item.notes || null
+          }
+        });
 
         if (item.type === 'physical') {
           const newBalance = item.current_quantity - item.quantity;
-          stockUpdate.run(newBalance, item.product_id);
-          stockLogInsert.run(item.product_id, item.quantity, newBalance, saleId, `Penjualan ${invoiceNumber}`, uId);
+          await tx.product.update({
+            where: { id: item.product_id },
+            data: { quantity: newBalance }
+          });
+
+          await tx.stockLog.create({
+            data: {
+              productId: item.product_id,
+              type: 'out',
+              quantity: item.quantity,
+              balance: newBalance,
+              saleId: sale.id,
+              notes: `Penjualan ${invoiceNumber}`,
+              userId: userId!
+            }
+          });
         }
       }
 
       // 5. Update discount used_count if exists
-      if (data.discount_id) {
-        db.prepare('UPDATE discounts SET used_count = used_count + 1 WHERE id = ?').run(data.discount_id);
+      if (payload.discount_id) {
+        await tx.discount.update({
+          where: { id: payload.discount_id },
+          data: { usedCount: { increment: 1 } }
+        });
       }
 
-      return { saleId, invoiceNumber, total };
+      return { saleId: sale.id, invoiceNumber, total };
     });
     
-    // Pass shiftId to transaction
-    const result = createSaleTx(payload, userId, shiftId);
     res.status(201).json({ status: 'success', data: result, message: 'Transaksi berhasil dibuat' });
 
   } catch (error: any) {
@@ -174,7 +200,7 @@ salesRouter.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/sales/export - Export transaksi ke file CSV
-salesRouter.get('/export', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+salesRouter.get('/export', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { start_date, end_date, status, payment_method } = req.query;
 
   try {
@@ -213,7 +239,7 @@ salesRouter.get('/export', authMiddleware, roleGuard(['admin', 'owner']), (req: 
 
     query += ' ORDER BY s.created_at DESC';
 
-    const sales = db.prepare(query).all(...params) as Record<string, any>[];
+    const sales = await db.prepare(query).all(...params) as Record<string, any>[];
 
     // Build CSV
     if (sales.length === 0) {
@@ -253,11 +279,11 @@ salesRouter.get('/export', authMiddleware, roleGuard(['admin', 'owner']), (req: 
 });
 
 // GET /api/sales/:id - Detail transaksi & Invoice
-salesRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+salesRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const sale = db.prepare(`
+    const sale = await db.prepare(`
       SELECT s.*, u.username as cashier_name 
       FROM sales s
       LEFT JOIN users u ON s.user_id = u.id
@@ -269,7 +295,7 @@ salesRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const items = db.prepare(`
+    const items = await db.prepare(`
       SELECT si.*, u.username as technician_name
       FROM sale_items si
       LEFT JOIN users u ON si.service_technician = u.id
@@ -288,7 +314,7 @@ salesRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /api/sales/:id/status - Update status pembayaran
-salesRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+salesRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { payment_status } = req.body;
 
@@ -298,9 +324,9 @@ salesRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), 
   }
 
   try {
-    const info = db.prepare('UPDATE sales SET payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(payment_status, id);
+    const info = await db.prepare('UPDATE sales SET payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(payment_status, id);
     
-    if (info.changes === 0) {
+    if ((info as any).changes === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Transaksi tidak ditemukan' });
       return;
     }
@@ -311,3 +337,4 @@ salesRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), 
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+

@@ -5,7 +5,7 @@ import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 export const servicesRouter = Router();
 
 // GET /api/services - Daftar layanan/servis
-servicesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
+servicesRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { status, technician_id, start_date, end_date } = req.query;
 
   try {
@@ -36,7 +36,7 @@ servicesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 
     query += ' ORDER BY si.service_schedule ASC';
 
-    const services = db.prepare(query).all(...params);
+    const services = await db.prepare(query).all(...params);
     res.json({ status: 'success', data: services, message: 'Daftar layanan berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -45,7 +45,7 @@ servicesRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /api/services/:id/status - Update status layanan
-servicesRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res: Response) => {
+servicesRouter.patch('/:id/status', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
   const user = req.user;
@@ -57,7 +57,7 @@ servicesRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res: Resp
 
   try {
     // Cek apakah user adalah admin/owner ATAU teknisi yang ditugaskan
-    const serviceItem = db.prepare('SELECT service_technician FROM sale_items WHERE id = ?').get(id) as any;
+    const serviceItem = await db.prepare('SELECT service_technician FROM sale_items WHERE id = ?').get(id) as any;
     
     if (!serviceItem) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Layanan tidak ditemukan' });
@@ -73,7 +73,7 @@ servicesRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res: Resp
       return;
     }
 
-    const info = db.prepare('UPDATE sale_items SET service_status = ? WHERE id = ?').run(status, id);
+    const info = await db.prepare('UPDATE sale_items SET service_status = ? WHERE id = ?').run(status, id);
     
     res.json({ status: 'success', data: null, message: 'Status layanan berhasil diupdate' });
   } catch (error) {
@@ -83,7 +83,7 @@ servicesRouter.patch('/:id/status', authMiddleware, (req: AuthRequest, res: Resp
 });
 
 // PATCH /api/services/:id/technician - Assign technician
-servicesRouter.patch('/:id/technician', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+servicesRouter.patch('/:id/technician', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { technician_id } = req.body;
 
@@ -94,15 +94,15 @@ servicesRouter.patch('/:id/technician', authMiddleware, roleGuard(['admin', 'own
 
   try {
     // Verifikasi teknisi ada dan aktif
-    const tech = db.prepare('SELECT id FROM users WHERE id = ? AND is_active = 1').get(technician_id);
+    const tech = await db.prepare('SELECT id FROM users WHERE id = ? AND is_active = 1').get(technician_id);
     if (!tech) {
       res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Teknisi tidak ditemukan atau tidak aktif' });
       return;
     }
 
-    const info = db.prepare('UPDATE sale_items SET service_technician = ? WHERE id = ?').run(technician_id, id);
+    const info = await db.prepare('UPDATE sale_items SET service_technician = ? WHERE id = ?').run(technician_id, id);
     
-    if (info.changes === 0) {
+    if ((info as any).changes === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Layanan tidak ditemukan' });
       return;
     }
@@ -113,3 +113,4 @@ servicesRouter.patch('/:id/technician', authMiddleware, roleGuard(['admin', 'own
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+

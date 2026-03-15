@@ -5,9 +5,9 @@ import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 export const suppliersRouter = Router();
 
 // GET /api/suppliers - Daftar supplier (semua role)
-suppliersRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
+suppliersRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const suppliers = db.prepare('SELECT * FROM suppliers WHERE is_active = 1 ORDER BY name ASC').all();
+    const suppliers = await db.prepare('SELECT * FROM suppliers WHERE is_active = 1 ORDER BY name ASC').all();
     res.json({ status: 'success', data: suppliers, message: 'Daftar supplier berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -16,7 +16,7 @@ suppliersRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/suppliers - Tambah supplier (admin)
-suppliersRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+suppliersRouter.post('/', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { name, contact_person, email, phone, address, city, postal_code, notes } = req.body;
 
   if (!name || !contact_person || !phone || !city) {
@@ -29,11 +29,11 @@ suppliersRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthReques
       INSERT INTO suppliers (name, contact_person, email, phone, address, city, postal_code, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const info = stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null);
+    const info = await stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null);
     
     res.status(201).json({ 
       status: 'success', 
-      data: { id: info.lastInsertRowid }, 
+      data: { id: (info as any).lastInsertRowid }, 
       message: 'Supplier berhasil ditambahkan' 
     });
   } catch (error) {
@@ -43,17 +43,17 @@ suppliersRouter.post('/', authMiddleware, roleGuard(['admin']), (req: AuthReques
 });
 
 // GET /api/suppliers/:id - Detail + daftar produk supplier ini
-suppliersRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+suppliersRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ? AND is_active = 1').get(id) as any;
+    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ? AND is_active = 1').get(id) as any;
     if (!supplier) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
     }
 
-    const products = db.prepare('SELECT * FROM products WHERE supplier_id = ? AND is_active = 1').all(id);
+    const products = await db.prepare('SELECT * FROM products WHERE supplier_id = ? AND is_active = 1').all(id);
 
     res.json({ 
       status: 'success', 
@@ -67,7 +67,7 @@ suppliersRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) =>
 });
 
 // PUT /api/suppliers/:id - Update supplier (admin)
-suppliersRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+suppliersRouter.put('/:id', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { name, contact_person, email, phone, address, city, postal_code, notes } = req.body;
 
@@ -82,9 +82,9 @@ suppliersRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthRequ
       SET name = ?, contact_person = ?, email = ?, phone = ?, address = ?, city = ?, postal_code = ?, notes = ?
       WHERE id = ? AND is_active = 1
     `);
-    const info = stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null, id);
+    const info = await stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null, id);
     
-    if (info.changes === 0) {
+    if ((info as any).changes === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
     }
@@ -97,14 +97,14 @@ suppliersRouter.put('/:id', authMiddleware, roleGuard(['admin']), (req: AuthRequ
 });
 
 // PATCH /api/suppliers/:id/deactivate - Nonaktifkan (admin)
-suppliersRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), (req: AuthRequest, res: Response) => {
+suppliersRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
     // Cek apakah ada produk aktif yang berelasi dengan supplier ini
-    const activeProducts = db.prepare('SELECT COUNT(*) as count FROM products WHERE supplier_id = ? AND is_active = 1').get(id) as { count: number };
+    const activeProducts = await db.prepare('SELECT COUNT(*) as count FROM products WHERE supplier_id = ? AND is_active = 1').get(id) as { count: number | bigint };
     
-    if (activeProducts.count > 0) {
+    if (Number(activeProducts.count) > 0) {
       res.status(400).json({ 
         status: 'error', 
         code: 'BAD_REQUEST', 
@@ -113,9 +113,9 @@ suppliersRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), (
       return;
     }
 
-    const info = db.prepare('UPDATE suppliers SET is_active = 0 WHERE id = ?').run(id);
+    const info = await db.prepare('UPDATE suppliers SET is_active = 0 WHERE id = ?').run(id);
     
-    if (info.changes === 0) {
+    if ((info as any).changes === 0) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
     }

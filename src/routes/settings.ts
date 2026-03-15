@@ -4,9 +4,9 @@ import { db } from '../db/index.js';
 const router = Router();
 
 // Get all settings
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const settings = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const settings = await db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
     const settingsMap = settings.reduce((acc, curr) => {
       acc[curr.key] = curr.value;
       return acc;
@@ -19,10 +19,10 @@ router.get('/', (req, res) => {
 });
 
 // Update settings
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const settings = req.body;
-    const update = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    const update = await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     
     const transaction = db.transaction((data) => {
       for (const [key, value] of Object.entries(data)) {
@@ -39,3 +39,4 @@ router.post('/', (req, res) => {
 });
 
 export { router as settingsRouter };
+

@@ -5,7 +5,7 @@ import { authMiddleware, AuthRequest, roleGuard } from '../middleware/auth.js';
 export const purchaseOrdersRouter = Router();
 
 // POST /api/purchase-orders - Buat PO baru
-purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { supplier_id, expected_date, notes, items } = req.body;
   const userId = req.user?.id;
 
@@ -15,7 +15,7 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (r
   }
 
   try {
-    const supplier = db.prepare('SELECT id FROM suppliers WHERE id = ?').get(supplier_id);
+    const supplier = await db.prepare('SELECT id FROM suppliers WHERE id = ?').get(supplier_id);
     if (!supplier) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
@@ -25,7 +25,7 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (r
       // 1. Generate PO Number (PO-YYYYMMDD-XXXX)
       const date = new Date();
       const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-      const lastPO = db.prepare("SELECT po_number FROM purchase_orders WHERE po_number LIKE ? ORDER BY id DESC LIMIT 1").get(`PO-${dateStr}-%`) as any;
+      const lastPO = await db.prepare("SELECT po_number FROM purchase_orders WHERE po_number LIKE ? ORDER BY id DESC LIMIT 1").get(`PO-${dateStr}-%`) as any;
       
       let seq = 1;
       if (lastPO) {
@@ -43,7 +43,7 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (r
           throw new Error('Data item PO tidak valid (qty/harga harus > 0)');
         }
         
-        const product = db.prepare('SELECT type FROM products WHERE id = ?').get(item.product_id) as any;
+        const product = await db.prepare('SELECT type FROM products WHERE id = ?').get(item.product_id) as any;
         if (!product || product.type !== 'physical') {
           throw new Error(`Produk ID ${item.product_id} tidak valid atau bukan barang fisik`);
         }
@@ -58,14 +58,14 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (r
       }
 
       // 3. Insert PO header
-      const poInsertInfo = db.prepare(`
+      const poInsertInfo = await db.prepare(`
         INSERT INTO purchase_orders (po_number, supplier_id, notes, total_amount, expected_date, created_by)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(poNumber, supplier_id, notes || null, totalAmount, expected_date || null, userId);
-      const poId = poInsertInfo.lastInsertRowid;
+      const poId = poInsert(info as any).lastInsertRowid;
 
       // 4. Insert PO items
-      const insertItem = db.prepare(`
+      const insertItem = await db.prepare(`
         INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost, subtotal)
         VALUES (?, ?, ?, ?, ?)
       `);
@@ -86,7 +86,7 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), (r
 });
 
 // GET /api/purchase-orders - List
-purchaseOrdersRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
+purchaseOrdersRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { status, supplier_id, start_date, end_date } = req.query;
 
   try {
@@ -114,7 +114,7 @@ purchaseOrdersRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) 
 
     query += ` ORDER BY po.created_at DESC`;
 
-    const pos = db.prepare(query).all(...params);
+    const pos = await db.prepare(query).all(...params);
     res.json({ status: 'success', data: pos, message: 'Daftar PO berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -123,11 +123,11 @@ purchaseOrdersRouter.get('/', authMiddleware, (req: AuthRequest, res: Response) 
 });
 
 // GET /api/purchase-orders/:id - Detail PO
-purchaseOrdersRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+purchaseOrdersRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const po = db.prepare(`
+    const po = await db.prepare(`
       SELECT po.*, s.name as supplier_name, u.username as created_by_name
       FROM purchase_orders po
       LEFT JOIN suppliers s ON po.supplier_id = s.id
@@ -140,7 +140,7 @@ purchaseOrdersRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Respons
       return;
     }
 
-    const items = db.prepare(`
+    const items = await db.prepare(`
       SELECT poi.*, p.name as product_name, p.sku
       FROM purchase_order_items poi
       JOIN products p ON poi.product_id = p.id
@@ -155,7 +155,7 @@ purchaseOrdersRouter.get('/:id', authMiddleware, (req: AuthRequest, res: Respons
 });
 
 // PATCH /api/purchase-orders/:id/status - Update Status (misal: draft -> sent -> cancelled)
-purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -165,7 +165,7 @@ purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'o
   }
 
   try {
-    const po = db.prepare('SELECT status FROM purchase_orders WHERE id = ?').get(id) as any;
+    const po = await db.prepare('SELECT status FROM purchase_orders WHERE id = ?').get(id) as any;
     if (!po) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'PO tidak ditemukan' });
       return;
@@ -176,7 +176,7 @@ purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'o
       return;
     }
 
-    db.prepare('UPDATE purchase_orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
+    await db.prepare('UPDATE purchase_orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
     res.json({ status: 'success', message: 'Status PO diperbarui' });
   } catch (error) {
     console.error(error);
@@ -185,7 +185,7 @@ purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'o
 });
 
 // POST /api/purchase-orders/:id/receive - Goods Receipt
-purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'owner']), (req: AuthRequest, res: Response) => {
+purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { received_items } = req.body; // Array of { id: po_item_id, received_qty: number }
   const userId = req.user?.id;
@@ -197,7 +197,7 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
 
   try {
     const processReceipt = db.transaction(() => {
-      const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
+      const po = await db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
       if (!po) throw new Error('PO tidak ditemukan');
       if (po.status === 'cancelled' || po.status === 'received') {
         throw new Error(`Tidak bisa menerima barang untuk PO dengan status ${po.status}`);
@@ -206,7 +206,7 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
       let everythingReceived = true;
       let somethingReceived = false;
 
-      const poItems = db.prepare('SELECT * FROM purchase_order_items WHERE po_id = ?').all(id) as any[];
+      const poItems = await db.prepare('SELECT * FROM purchase_order_items WHERE po_id = ?').all(id) as any[];
 
       for (const poItem of poItems) {
         const receiptInput = received_items.find((r: any) => r.id === poItem.id);
@@ -219,21 +219,21 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
           }
 
           // Update PO Item
-          db.prepare('UPDATE purchase_order_items SET received_qty = ? WHERE id = ?').run(newReceivedTotal, poItem.id);
+          await db.prepare('UPDATE purchase_order_items SET received_qty = ? WHERE id = ?').run(newReceivedTotal, poItem.id);
           
           if (newReceivedTotal < poItem.quantity) {
              everythingReceived = false;
           }
 
           // Update Product Stock & Cost
-          const currentProduct = db.prepare('SELECT quantity, cost FROM products WHERE id = ?').get(poItem.product_id) as any;
+          const currentProduct = await db.prepare('SELECT quantity, cost FROM products WHERE id = ?').get(poItem.product_id) as any;
           const newStock = currentProduct.quantity + addingQty;
           // Asumsi cost baru = unit_cost terakhir. Untuk weighted average = ((old_qty * old_cost) + (new_qty * new_cost)) / (old_qty + new_qty)
           // Simplified: last price in
-          db.prepare('UPDATE products SET quantity = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStock, poItem.unit_cost, poItem.product_id);
+          await db.prepare('UPDATE products SET quantity = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStock, poItem.unit_cost, poItem.product_id);
 
           // Insert Stock Log
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO stock_logs (product_id, type, quantity, balance, notes, user_id)
             VALUES (?, 'in', ?, ?, ?, ?)
           `).run(poItem.product_id, addingQty, newStock, `Goods Receipt PO ${po.po_number}`, userId);
@@ -252,7 +252,7 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
       const receivedDateStr = finalStatus === 'received' ? "CURRENT_TIMESTAMP" : (po.received_date ? `'${po.received_date}'` : "CURRENT_TIMESTAMP"); // Partial sets first received date too?
 
       // Using JS date string to keep it clean for partial vs full
-      db.prepare(`
+      await db.prepare(`
           UPDATE purchase_orders 
           SET status = ?, received_date = COALESCE(received_date, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
           WHERE id = ?
@@ -268,3 +268,4 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: error.message || 'Gagal mencatat penerimaan barang' });
   }
 });
+

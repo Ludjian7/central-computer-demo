@@ -8,7 +8,7 @@ export const authRouter = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'central-computer-secret-key';
 
 // POST /api/auth/login
-authRouter.post('/login', (req: AuthRequest, res: Response) => {
+authRouter.post('/login', async (req: AuthRequest, res: Response) => {
   const { username, password } = req.body;
   
   if (!username || !password) {
@@ -17,14 +17,16 @@ authRouter.post('/login', (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username) as any;
+    const user = await (db as any).user.findUnique({ 
+      where: { username, isActive: true } 
+    });
     
     if (!user) {
       res.status(401).json({ status: 'error', code: 'AUTH_FAILED', message: 'Username atau password salah' });
       return;
     }
 
-    const isValid = bcrypt.compareSync(password, user.password_hash);
+    const isValid = bcrypt.compareSync(password, user.passwordHash);
     if (!isValid) {
       res.status(401).json({ status: 'error', code: 'AUTH_FAILED', message: 'Username atau password salah' });
       return;
@@ -52,20 +54,22 @@ authRouter.post('/login', (req: AuthRequest, res: Response) => {
 
 // POST /api/auth/logout
 authRouter.post('/logout', authMiddleware, (req: AuthRequest, res: Response) => {
-  // Karena JWT stateless, logout ditangani di sisi klien dengan menghapus token.
-  // Endpoint ini disediakan untuk konsistensi API dan logging.
   res.json({ status: 'success', data: null, message: 'Logout berhasil' });
 });
 
 // GET /api/auth/me
-authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
+authRouter.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const user = db.prepare('SELECT id, username, email, role, is_active, created_at FROM users WHERE id = ?').get(req.user?.id) as any;
-    if (!user || !user.is_active) {
+    const user = await (db as any).user.findUnique({ 
+      where: { id: req.user?.id } 
+    });
+    if (!user || !user.isActive) {
       res.status(401).json({ status: 'error', code: 'UNAUTHORIZED', message: 'User tidak aktif atau tidak ditemukan' });
       return;
     }
-    res.json({ status: 'success', data: user, message: 'Data user berhasil diambil' });
+    // Remove sensitive data
+    const { passwordHash, ...safeUser } = user;
+    res.json({ status: 'success', data: safeUser, message: 'Data user berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -73,9 +77,12 @@ authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/auth/users
-authRouter.get('/users', authMiddleware, (req: AuthRequest, res: Response) => {
+authRouter.get('/users', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const users = db.prepare('SELECT id, username, email, role, is_active FROM users WHERE is_active = 1').all();
+    const users = await (db as any).user.findMany({
+      where: { isActive: true },
+      select: { id: true, username: true, email: true, role: true, isActive: true }
+    });
     res.json({ status: 'success', data: users, message: 'Data users berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -84,7 +91,7 @@ authRouter.get('/users', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /api/auth/change-password
-authRouter.patch('/change-password', authMiddleware, (req: AuthRequest, res: Response) => {
+authRouter.patch('/change-password', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { old_password, new_password } = req.body;
   
   if (!old_password || !new_password) {
@@ -93,16 +100,27 @@ authRouter.patch('/change-password', authMiddleware, (req: AuthRequest, res: Res
   }
 
   try {
-    const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user?.id) as any;
+    const user = await (db as any).user.findUnique({ 
+      where: { id: req.user?.id },
+      select: { passwordHash: true }
+    });
     
-    const isValid = bcrypt.compareSync(old_password, user.password_hash);
+    if (!user) {
+      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'User tidak ditemukan' });
+      return;
+    }
+
+    const isValid = bcrypt.compareSync(old_password, user.passwordHash);
     if (!isValid) {
       res.status(400).json({ status: 'error', code: 'INVALID_PASSWORD', message: 'Password lama salah' });
       return;
     }
 
     const newHash = bcrypt.hashSync(new_password, 10);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHash, req.user?.id);
+    await (db as any).user.update({
+      where: { id: req.user?.id },
+      data: { passwordHash: newHash }
+    });
 
     res.json({ status: 'success', data: null, message: 'Password berhasil diubah' });
   } catch (error) {

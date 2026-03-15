@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
+}
+
+model User {
+  id            Int             @id @default(autoincrement())
+  username      String          @unique
+  email         String          @unique
+  passwordHash  String          @map("password_hash")
+  role          String
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  
+  sales         Sale[]
+  stockLogs     StockLog[]
+  returns       Return[]
+  activities    ActivityLog[]
+  pos           PurchaseOrder[]
+  opnames       StockOpname[]
+  discounts     Discount[]
+  shifts        CashShift[]
+  saleItemsTech SaleItem[]      @relation("Technician")
+
+  @@map("users")
+}
+
+model Supplier {
+  id            Int             @id @default(autoincrement())
+  name          String
+  contactPerson String          @map("contact_person")
+  email         String?
+  phone         String
+  address       String?
+  city          String
+  postalCode    String?         @map("postal_code")
+  notes         String?
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  
+  products      Product[]
+  stockLogs     StockLog[]
+  pos           PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id              Int             @id @default(autoincrement())
+  name            String
+  description     String?
+  type            String
+  sku             String          @unique
+  barcode         String?
+  price           Int
+  cost            Int             @default(0)
+  quantity        Int             @default(0)
+  minQuantity     Int             @default(2) @map("min_quantity")
+  category        String
+  brand           String?
+  location        String?
+  durationMinutes Int?            @map("duration_minutes")
+  serviceDetails  String?         @map("service_details")
+  supplierId      Int?            @map("supplier_id")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  saleItems       SaleItem[]
+  stockLogs       StockLog[]
+  returns         Return[]
+  poItems         PurchaseOrderItem[]
+  opnameItems     StockOpnameItem[]
+
+  @@map("products")
+}
+
+model Sale {
+  id              Int             @id @default(autoincrement())
+  invoiceNumber   String          @unique @map("invoice_number")
+  customerName    String          @map("customer_name")
+  customerPhone   String?         @map("customer_phone")
+  customerEmail   String?         @map("customer_email")
+  subtotal        Int
+  tax             Int             @default(0)
+  discount        Int             @default(0)
+  total           Int
+  paymentMethod   String          @map("payment_method")
+  paymentStatus   String          @default("pending") @map("payment_status")
+  notes           String?
+  userId          Int             @map("user_id")
+  discountId      Int?            @map("discount_id")
+  shiftId         Int?            @map("shift_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  
+  user            User            @relation(fields: [userId], references: [id])
+  discountRef     Discount?       @relation(fields: [discountId], references: [id])
+  shift           CashShift?      @relation(fields: [shiftId], references: [id])
+  items           SaleItem[]
+  returns         Return[]
+  stockLogs       StockLog[]
+
+  @@map("sales")
+}
+
+model SaleItem {
+  id                Int             @id @default(autoincrement())
+  saleId            Int             @map("sale_id")
+  productId         Int             @map("product_id")
+  quantity          Int
+  price             Int
+  unitCost          Int             @default(0) @map("unit_cost")
+  discount          Int             @default(0)
+  subtotal          Int
+  productName       String          @map("product_name")
+  productSku        String          @map("product_sku")
+  serviceSchedule   DateTime?       @map("service_schedule")
+  serviceStatus     String?         @map("service_status")
+  serviceTechnician Int?            @map("service_technician")
+  notes             String?
+  createdAt         DateTime        @default(now()) @map("created_at")
+  
+  sale              Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product           Product         @relation(fields: [productId], references: [id])
+  technician        User?           @relation("Technician", fields: [serviceTechnician], references: [id])
+  returns           Return[]
+
+  @@map("sale_items")
+}
+
+model StockLog {
+  id          Int       @id @default(autoincrement())
+  productId   Int       @map("product_id")
+  type        String
+  quantity    Int
+  balance     Int
+  saleId      Int?      @map("sale_id")
+  supplierId  Int?      @map("supplier_id")
+  notes       String?
+  userId      Int       @map("user_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sale        Sale?     @relation(fields: [saleId], references: [id])
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@map("stock_logs")
+}
+
+model HolidayConfig {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @unique
+  name      String
+  type      String
+  isActive  Boolean  @default(true) @map("is_active")
+
+  @@map("holiday_config")
+}
+
+model Return {
+  id              Int       @id @default(autoincrement())
+  saleId          Int       @map("sale_id")
+  saleItemId      Int       @map("sale_item_id")
+  productId       Int       @map("product_id")
+  quantity        Int
+  reason          String
+  refundAmount    Int       @default(0) @map("refund_amount")
+  refundMethod    String?   @map("refund_method")
+  status          String    @default("approved")
+  processedBy     Int       @map("processed_by")
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  
+  sale            Sale      @relation(fields: [saleId], references: [id])
+  saleItem        SaleItem  @relation(fields: [saleItemId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+  processor       User      @relation(fields: [processedBy], references: [id])
+
+  @@map("returns")
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?     @map("user_id")
+  method    String
+  endpoint  String
+  summary   String?
+  ipAddress String? @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model PurchaseOrder {
+  id            Int       @id @default(autoincrement())
+  poNumber      String    @unique @map("po_number")
+  supplierId    Int       @map("supplier_id")
+  status        String    @default("draft")
+  notes         String?
+  totalAmount   Int       @default(0) @map("total_amount")
+  expectedDate  DateTime? @map("expected_date")
+  receivedDate  DateTime? @map("received_date")
+  createdBy     Int       @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  supplier      Supplier  @relation(fields: [supplierId], references: [id])
+  creator       User      @relation(fields: [createdBy], references: [id])
+  items         PurchaseOrderItem[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id          Int      @id @default(autoincrement())
+  poId        Int      @map("po_id")
+  productId   Int      @map("product_id")
+  quantity    Int
+  unitCost    Int      @map("unit_cost")
+  subtotal    Int
+  receivedQty Int      @default(0) @map("received_qty")
+  
+  po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product     Product       @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+model StockOpname {
+  id          Int       @id @default(autoincrement())
+  opnameDate  DateTime  @map("opname_date")
+  status      String    @default("draft")
+  notes       String?
+  createdBy   Int       @map("created_by")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  creator     User      @relation(fields: [createdBy], references: [id])
+  items       StockOpnameItem[]
+
+  @@map("stock_opname")
+}
+
+model StockOpnameItem {
+  id              Int      @id @default(autoincrement())
+  opnameId        Int      @map("opname_id")
+  productId       Int      @map("product_id")
+  systemQty       Int      @map("system_qty")
+  physicalQty     Int?     @map("physical_qty")
+  difference      Int?
+  adjustmentNotes String?  @map("adjustment_notes")
+  
+  opname          StockOpname @relation(fields: [opnameId], references: [id], onDelete: Cascade)
+  product         Product     @relation(fields: [productId], references: [id])
+
+  @@map("stock_opname_items")
+}
+
+model Discount {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  type        String
+  value       Int
+  minPurchase Int      @default(0) @map("min_purchase")
+  maxDiscount Int?     @map("max_discount")
+  usageLimit  Int?     @map("usage_limit")
+  usedCount   Int      @default(0) @map("used_count")
+  validFrom   DateTime @map("valid_from")
+  validUntil  DateTime @map("valid_until")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdBy   Int      @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  creator     User     @relation(fields: [createdBy], references: [id])
+  sales       Sale[]
+
+  @@map("discounts")
+}
+
+model CashShift {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  openedAt    DateTime  @default(now()) @map("opened_at")
+  closedAt    DateTime? @map("closed_at")
+  openingCash Int       @default(0) @map("opening_cash")
+  closingCash Int?      @map("closing_cash")
+  systemCash  Int?      @map("system_cash")
+  notes       String?
+  status      String    @default("open")
+  
+  user        User      @relation(fields: [userId], references: [id])
+  sales       Sale[]
+
+  @@map("cash_shifts")
+}
+
+model Setting {
+  key   String @id
+  value String
+
+  @@map("settings")
+}

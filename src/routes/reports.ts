@@ -8,7 +8,7 @@ export const reportsRouter = Router();
 reportsRouter.use(authMiddleware, roleGuard(['admin', 'owner']));
 
 // GET /api/reports/summary - Ringkasan Dashboard
-reportsRouter.get('/summary', (req: AuthRequest, res: Response) => {
+reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date } = req.query;
 
   try {
@@ -21,7 +21,7 @@ reportsRouter.get('/summary', (req: AuthRequest, res: Response) => {
     }
 
     // 1. Total Pendapatan & Jumlah Transaksi
-    const salesStats = db.prepare(`
+    const salesStats = await db.prepare(`
       SELECT 
         COUNT(id) as total_transactions,
         COALESCE(SUM(total), 0) as total_revenue
@@ -30,14 +30,14 @@ reportsRouter.get('/summary', (req: AuthRequest, res: Response) => {
     `).get(...params) as any;
 
     // 2. Layanan Aktif (Scheduled / In Progress)
-    const activeServices = db.prepare(`
+    const activeServices = await db.prepare(`
       SELECT COUNT(id) as count
       FROM sale_items
       WHERE service_status IN ('scheduled', 'in_progress')
     `).get() as any;
 
     // 3. Produk Stok Menipis
-    const lowStock = db.prepare(`
+    const lowStock = await db.prepare(`
       SELECT COUNT(id) as count
       FROM products
       WHERE type = 'physical' AND quantity <= min_quantity AND is_active = 1
@@ -60,7 +60,7 @@ reportsRouter.get('/summary', (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/reports/sales-trend - Tren Penjualan (Grafik)
-reportsRouter.get('/sales-trend', (req: AuthRequest, res: Response) => {
+reportsRouter.get('/sales-trend', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date, period = 'daily' } = req.query;
 
   try {
@@ -81,7 +81,7 @@ reportsRouter.get('/sales-trend', (req: AuthRequest, res: Response) => {
       dateFormat = '%Y';
     }
 
-    const trend = db.prepare(`
+    const trend = await db.prepare(`
       SELECT 
         strftime('${dateFormat}', created_at) as label,
         COUNT(id) as total_transactions,
@@ -100,7 +100,7 @@ reportsRouter.get('/sales-trend', (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/reports/top-products - Produk Terlaris
-reportsRouter.get('/top-products', (req: AuthRequest, res: Response) => {
+reportsRouter.get('/top-products', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date, limit = 10 } = req.query;
 
   try {
@@ -114,7 +114,7 @@ reportsRouter.get('/top-products', (req: AuthRequest, res: Response) => {
 
     params.push(limit);
 
-    const topProducts = db.prepare(`
+    const topProducts = await db.prepare(`
       SELECT 
         si.product_id as id,
         si.product_name as name,
@@ -139,7 +139,7 @@ reportsRouter.get('/top-products', (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/reports/technician-performance - Performa Teknisi
-reportsRouter.get('/technician-performance', (req: AuthRequest, res: Response) => {
+reportsRouter.get('/technician-performance', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date } = req.query;
 
   try {
@@ -151,7 +151,7 @@ reportsRouter.get('/technician-performance', (req: AuthRequest, res: Response) =
       params.push(start_date, end_date);
     }
 
-    const performance = db.prepare(`
+    const performance = await db.prepare(`
       SELECT 
         u.id as id,
         u.username as username,
@@ -174,7 +174,7 @@ reportsRouter.get('/technician-performance', (req: AuthRequest, res: Response) =
 });
 
 // GET /api/reports/profit-loss - Laba Rugi
-reportsRouter.get('/profit-loss', (req: AuthRequest, res: Response) => {
+reportsRouter.get('/profit-loss', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date } = req.query;
 
   try {
@@ -187,7 +187,7 @@ reportsRouter.get('/profit-loss', (req: AuthRequest, res: Response) => {
     }
 
     // 1. Summary
-    const summary = db.prepare(`
+    const summary = await db.prepare(`
         SELECT 
             COALESCE(SUM(s.total), 0) as total_revenue,
             COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, 0)), 0) as total_cogs
@@ -202,7 +202,7 @@ reportsRouter.get('/profit-loss', (req: AuthRequest, res: Response) => {
     const grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
     // 2. By Category
-    const byCategory = db.prepare(`
+    const byCategory = await db.prepare(`
         SELECT 
             p.category,
             SUM(si.subtotal) as revenue,
@@ -216,7 +216,7 @@ reportsRouter.get('/profit-loss', (req: AuthRequest, res: Response) => {
     `).all(...params) as any[];
 
     // 3. By Period (Monthly)
-    const byPeriod = db.prepare(`
+    const byPeriod = await db.prepare(`
         SELECT 
             strftime('%Y-%m', s.created_at) as period,
             SUM(s.total) as revenue,
@@ -252,3 +252,4 @@ reportsRouter.get('/profit-loss', (req: AuthRequest, res: Response) => {
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Gagal menghitung laporan laba rugi' });
   }
 });
+
