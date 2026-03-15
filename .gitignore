@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Database files (never commit production DB)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Debug & dev scripts
+debug-*.ts
+debug-*.js
+diag-*.ts
+sprint*.mjs
+sprint*.ts
+test-*.js
+check_schema.js
+cleanup-*.ts
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
