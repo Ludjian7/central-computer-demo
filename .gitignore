@@ -23,6 +23,15 @@ sprint*.ts
 test-*.js
 check_schema.js
 cleanup-*.ts
+scripts/sanity_check.ts
+scripts/fix_settings.ts
+scripts/shift_dates.ts
+scripts/test-dashboard.ts
+scripts/seed.ts
+
+# SQL Dumps
+*.sql
+
 
 # Logs
 *.log
