@@ -7,11 +7,14 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const { login, isAuthenticated } = useAuth();
+  const { user, login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
   // Redirect if already logged in
-  if (isAuthenticated) {
+  if (isAuthenticated && user) {
+    if (user.role === 'karyawan') {
+      return <Navigate to="/pos" replace />;
+    }
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -29,6 +32,13 @@ export default function Login() {
       const data = await res.json();
       if (data.status === 'success') {
         login(data.data.token, data.data.user);
+        
+        // Cek kembali perannya, arahkan 'karyawan' ke kasir
+        if (data.data.user.role === 'karyawan') {
+          navigate('/pos', { replace: true });
+        } else {
+          navigate('/dashboard', { replace: true });
+        }
       } else {
         alert(data.message || 'Login failed');
       }

@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
@@ -24,6 +24,15 @@ import Shifts from './pages/Shifts';
 import { ShiftBanner } from './components/ShiftBanner';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+
+// Helper component to redirect root path based on user role
+function IndexRedirect() {
+  const { user, isAuthenticated } = useAuth();
+  
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user?.role === 'karyawan') return <Navigate to="/pos" replace />;
+  return <Navigate to="/dashboard" replace />;
+}
 
 export default function App() {
   return (
@@ -55,7 +64,7 @@ export default function App() {
                 </Route>
               </Route>
 
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<IndexRedirect />} />
             </Routes>
           </AuthProvider>
         </ToastProvider>
