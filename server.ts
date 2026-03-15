@@ -41,21 +41,4 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.get("/api/debug/db", async (req, res) => {
-  try {
-    const { prisma } = await import("./src/db/index.js");
-    const count = await prisma.user.count();
-    const firstUser = await prisma.user.findFirst({ select: { username: true } });
-    res.json({ 
-      status: "success", 
-      userCount: count, 
-      firstUser: firstUser?.username,
-      env: process.env.NODE_ENV,
-      dbUrlDefined: !!process.env.PRISMA_DATABASE_URL
-    });
-  } catch (error: any) {
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
 export default app;
