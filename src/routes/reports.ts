@@ -16,7 +16,7 @@ reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
     const params: any[] = [];
 
     if (start_date && end_date) {
-      dateFilter = 'AND date(created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND created_at::DATE BETWEEN $1 AND $2';
       params.push(start_date, end_date);
     }
 
@@ -68,22 +68,22 @@ reportsRouter.get('/sales-trend', async (req: AuthRequest, res: Response) => {
     const params: any[] = [];
 
     if (start_date && end_date) {
-      dateFilter = 'AND date(created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND created_at::DATE BETWEEN $1 AND $2';
       params.push(start_date, end_date);
     }
 
-    let dateFormat = '%Y-%m-%d'; // daily
+    let dateFormat = 'YYYY-MM-DD'; // daily
     if (period === 'weekly') {
-      dateFormat = '%Y-W%W';
+      dateFormat = 'IYYY-\"W\"IW';
     } else if (period === 'monthly') {
-      dateFormat = '%Y-%m';
+      dateFormat = 'YYYY-MM';
     } else if (period === 'yearly') {
-      dateFormat = '%Y';
+      dateFormat = 'YYYY';
     }
 
     const trend = await db.prepare(`
       SELECT 
-        strftime('${dateFormat}', created_at) as label,
+        TO_CHAR(created_at, '${dateFormat}') as label,
         COUNT(id) as total_transactions,
         COALESCE(SUM(total), 0) as total_revenue
       FROM sales
@@ -108,7 +108,7 @@ reportsRouter.get('/top-products', async (req: AuthRequest, res: Response) => {
     const params: any[] = [];
 
     if (start_date && end_date) {
-      dateFilter = 'AND date(s.created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND s.created_at::DATE BETWEEN $1 AND $2';
       params.push(start_date, end_date);
     }
 
@@ -147,7 +147,7 @@ reportsRouter.get('/technician-performance', async (req: AuthRequest, res: Respo
     const params: any[] = [];
 
     if (start_date && end_date) {
-      dateFilter = 'AND date(s.created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND s.created_at::DATE BETWEEN $1 AND $2';
       params.push(start_date, end_date);
     }
 
@@ -182,7 +182,7 @@ reportsRouter.get('/profit-loss', async (req: AuthRequest, res: Response) => {
     const params: any[] = [];
 
     if (start_date && end_date) {
-      dateFilter = 'AND date(s.created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND s.created_at::DATE BETWEEN $1 AND $2';
       params.push(start_date, end_date);
     }
 
@@ -218,7 +218,7 @@ reportsRouter.get('/profit-loss', async (req: AuthRequest, res: Response) => {
     // 3. By Period (Monthly)
     const byPeriod = await db.prepare(`
         SELECT 
-            strftime('%Y-%m', s.created_at) as period,
+            TO_CHAR(s.created_at, 'YYYY-MM') as period,
             SUM(s.total) as revenue,
             SUM(si.quantity * COALESCE(si.unit_cost, 0)) as cogs,
             SUM(s.total - (si.quantity * COALESCE(si.unit_cost, 0))) as gross_profit,
