@@ -86,3 +86,26 @@ export function useTechnicianPerformance(startDate?: string, endDate?: string) {
     }
   });
 }
+
+export function useLowStockReport() {
+  return useQuery({
+    queryKey: ['reports', 'low-stock'],
+    queryFn: async () => {
+      const response = await api.get('/reports/low-stock');
+      return response.data.data;
+    },
+    refetchInterval: 5 * 60 * 1000 // refresh tiap 5 menit
+  });
+}
+
+export function useServiceAging(days: number = 3) {
+  return useQuery({
+    queryKey: ['reports', 'service-aging', days],
+    queryFn: async () => {
+      const response = await api.get('/reports/service-aging', {
+        params: { days }
+      });
+      return response.data.data;
+    }
+  });
+}
