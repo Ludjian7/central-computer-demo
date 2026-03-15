@@ -46,9 +46,14 @@ authRouter.post('/login', async (req: AuthRequest, res: Response) => {
       data: { token, user: { id: user.id, username: user.username, role: user.role, email: user.email } },
       message: 'Login berhasil'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    res.status(500).json({ 
+      status: 'error', 
+      code: 'SERVER_ERROR', 
+      message: 'Terjadi kesalahan server',
+      debugDetails: error?.message || String(error)
+    });
   }
 });
 
