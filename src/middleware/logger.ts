@@ -11,26 +11,22 @@ export const activityLogger = (req: AuthRequest, res: Response, next: NextFuncti
     res.send = function (body): Response {
       res.send = originalSend;
       
-      try {
-        const userId = req.user?.id || null;
-        const method = req.method;
-        const endpoint = req.originalUrl;
-        const ipAddress = req.ip || req.socket.remoteAddress || null;
-        
-        // Jangan log password di payload
-        let summary = `Payload: ${JSON.stringify(req.body)}`;
-        if (endpoint.includes('/login') || endpoint.includes('/change-password') || endpoint.includes('/reset-password')) {
-          summary = 'Authentication action (payload hidden)';
-        }
-
-        const stmt = db.prepare(`
-          INSERT INTO activity_logs (user_id, method, endpoint, summary, ip_address)
-          VALUES (?, ?, ?, ?, ?)
-        `);
-        stmt.run(userId, method, endpoint, summary, ipAddress);
-      } catch (error: any) {
-        console.error('Failed to log activity:', error.message || error);
+      const userId = req.user?.id || null;
+      const method = req.method;
+      const endpoint = req.originalUrl;
+      const ipAddress = (req.ip || req.socket.remoteAddress || null) as string;
+      
+      let summary = `Payload: ${JSON.stringify(req.body)}`;
+      if (endpoint.includes('/login') || endpoint.includes('/change-password') || endpoint.includes('/reset-password')) {
+        summary = 'Authentication action (payload hidden)';
       }
+
+      // Jalankan asinkron tanpa menunggu, agar tidak memperlambat respon user
+      db.prepare(`
+        INSERT INTO activity_logs (user_id, method, endpoint, summary, ip_address)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(userId, method, endpoint, summary, ipAddress)
+      .catch((err: any) => console.error('Activity Log Error:', err));
 
       return res.send(body);
     };
