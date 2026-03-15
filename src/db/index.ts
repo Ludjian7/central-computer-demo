@@ -17,12 +17,22 @@ export const db = {
         return res[0];
       },
       run: async (...params: any[]) => {
+        // If INSERT, use RETURNING id to get the last inserted id
+        const isInsert = postgresSql.trim().toUpperCase().startsWith('INSERT');
+        if (isInsert) {
+          const sqlWithReturning = postgresSql.includes('RETURNING')
+            ? postgresSql
+            : `${postgresSql} RETURNING id`;
+          const result = await prisma.$queryRawUnsafe(sqlWithReturning, ...params) as any[];
+          return { changes: result.length, lastInsertRowid: result[0]?.id ?? null };
+        }
         const result = await prisma.$executeRawUnsafe(postgresSql, ...params);
-        return { changes: result, lastInsertRowid: null }; // lastInsertRowid is tricky in Postgres, usually handled by RETURNING
+        return { changes: result, lastInsertRowid: null };
       }
     };
   },
-  transaction: (fn: any) => (...args: any[]) => prisma.$transaction((tx) => fn(...args, tx)),
+  // transaction wraps Prisma $transaction - fn is called with no extra args
+  transaction: (fn: any) => async (...args: any[]) => prisma.$transaction(() => fn(...args)),
   $transaction: (fn: any) => prisma.$transaction(fn),
   $queryRawUnsafe: (sql: string, ...params: any[]) => prisma.$queryRawUnsafe(sql, ...params),
   $executeRawUnsafe: (sql: string, ...params: any[]) => prisma.$executeRawUnsafe(sql, ...params),
