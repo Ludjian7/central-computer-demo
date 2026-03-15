@@ -89,12 +89,12 @@ const Discounts: React.FC = () => {
                        ) : (
                          <span className="flex items-center gap-1.5 px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-semibold">
                            <Banknote className="w-3.5 h-3.5" />
-                           Rp {discount.value.toLocaleString('id-ID')}
+                           Rp {(discount.value || 0).toLocaleString('id-ID')}
                          </span>
                        )}
                     </div>
                     {discount.max_discount && (
-                      <div className="text-[10px] text-slate-400 mt-1 uppercase">Maks: Rp {discount.max_discount.toLocaleString('id-ID')}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 uppercase">Maks: Rp {(discount.max_discount || 0).toLocaleString('id-ID')}</div>
                     )}
                   </td>
                   <td className="px-6 py-4">

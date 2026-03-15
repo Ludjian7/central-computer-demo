@@ -132,7 +132,7 @@ export default function Dashboard() {
         {/* Total Pendapatan + Growth */}
         <MetricCard 
           title="Pendapatan Bulan Ini" 
-          value={formatCurrency(summary?.total_revenue)} 
+          value={formatCurrency(summary?.total_revenue || 0)} 
           icon={<DollarSign size={24} className="text-[#52c46a]" />}
           trend={`${Math.abs(summary?.revenue_growth_pct || 0)}% dari bulan lalu`}
           trendUp={(summary?.revenue_growth_pct || 0) >= 0}

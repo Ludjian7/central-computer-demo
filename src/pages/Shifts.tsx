@@ -128,7 +128,7 @@ const ShiftDetailView: React.FC<{ id: number }> = ({ id }) => {
           </div>
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
              <div className="text-[10px] uppercase font-bold text-indigo-400 mb-1">Modal Awal</div>
-             <div className="text-sm font-bold text-indigo-700">Rp {shift.opening_cash.toLocaleString('id-ID')}</div>
+             <div className="text-sm font-bold text-indigo-700">Rp {(shift.opening_cash || 0).toLocaleString('id-ID')}</div>
           </div>
         </div>
 
@@ -147,11 +147,10 @@ const ShiftDetailView: React.FC<{ id: number }> = ({ id }) => {
                   <div className="flex items-center justify-between mb-2">
                     {sum.payment_method === 'cash' && <Banknote className="w-5 h-5 text-emerald-500" />}
                     {sum.payment_method === 'transfer' && <CreditCard className="w-5 h-5 text-blue-500" />}
-                    {sum.payment_method === 'qris' && <QrCode className="w-5 h-5 text-purple-500" />}
                     <span className="text-[10px] font-bold text-slate-400 uppercase">{sum.transactions} Transaksi</span>
                   </div>
                   <div className="text-xs font-medium text-slate-500 uppercase mb-0.5">{sum.payment_method}</div>
-                  <div className="text-lg font-extrabold text-slate-800 tracking-tight">Rp {sum.revenue.toLocaleString('id-ID')}</div>
+                  <div className="text-lg font-extrabold text-slate-800 tracking-tight">Rp {(sum.revenue || 0).toLocaleString('id-ID')}</div>
                 </div>
               ))}
             </div>
@@ -176,7 +175,7 @@ const ShiftDetailView: React.FC<{ id: number }> = ({ id }) => {
                 <div className="pt-3 border-t border-slate-800 flex justify-between items-end">
                    <div className="text-[10px] font-bold text-indigo-400 uppercase leading-none">SELISIH</div>
                    <div className={`text-2xl font-black italic tracking-tighter ${diffAmount < 0 ? 'text-red-400' : diffAmount > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
-                     {diffAmount > 0 ? '+' : ''}{diffAmount.toLocaleString('id-ID')}
+                     {diffAmount > 0 ? '+' : ''}{(diffAmount || 0).toLocaleString('id-ID')}
                    </div>
                 </div>
               </div>
@@ -206,7 +205,7 @@ const ShiftDetailView: React.FC<{ id: number }> = ({ id }) => {
                      <td className="px-4 py-3">
                        <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">{t.payment_method}</span>
                      </td>
-                     <td className="px-4 py-3 text-right font-bold">Rp {t.total.toLocaleString('id-ID')}</td>
+                     <td className="px-4 py-3 text-right font-bold">Rp {(t.total || 0).toLocaleString('id-ID')}</td>
                      <td className="px-4 py-3 text-right text-slate-500">{format(new Date(t.created_at), 'HH:mm')}</td>
                    </tr>
                  ))}

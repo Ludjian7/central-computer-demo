@@ -190,7 +190,7 @@ export default function PurchaseOrderModal({ isOpen, onClose, prefillProductId }
                         />
                       </td>
                       <td className="px-4 py-2 text-right font-medium">
-                        Rp {(item.quantity * item.unit_cost).toLocaleString()}
+                        Rp {((item.quantity * item.unit_cost) || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-2">
                         <button type="button" onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700">
