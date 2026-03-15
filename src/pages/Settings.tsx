@@ -12,7 +12,8 @@ export default function Settings() {
     store_address: '',
     store_phone: '',
     tax_ppn: '',
-    currency_symbol: ''
+    currency_symbol: '',
+    monthly_target: ''
   });
 
   useEffect(() => {
@@ -22,7 +23,8 @@ export default function Settings() {
         store_address: settings.store_address || '',
         store_phone: settings.store_phone || '',
         tax_ppn: settings.tax_ppn || '',
-        currency_symbol: settings.currency_symbol || ''
+        currency_symbol: settings.currency_symbol || '',
+        monthly_target: settings.monthly_target || ''
       });
     }
   }, [settings]);
@@ -139,6 +141,22 @@ export default function Settings() {
                   placeholder="Rp"
                 />
               </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Target Pendapatan Bulanan (Rp)</label>
+              <div className="relative">
+                <Coins className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="number"
+                  name="monthly_target"
+                  value={formData.monthly_target}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="150000000"
+                />
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">Digunakan untuk menghitung progress pencapaian di Dashboard KPI.</p>
             </div>
           </div>
         </div>

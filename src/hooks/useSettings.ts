@@ -8,6 +8,7 @@ export interface Settings {
   store_phone: string;
   tax_ppn: string;
   currency_symbol: string;
+  monthly_target: string;
   [key: string]: string;
 }
 
