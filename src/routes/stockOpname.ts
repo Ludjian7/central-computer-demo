@@ -26,14 +26,14 @@ stockOpnameRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), async
   const userId = req.user?.id;
 
   try {
-    const result = db.transaction(() => {
+    const result = await db.transaction(async () => {
       // 1. Insert header
       const header = await db.prepare(`
         INSERT INTO stock_opname (opname_date, notes, created_by, status)
         VALUES (?, ?, ?, 'draft')
       `).run(opname_date || new Date().toISOString().split('T')[0], notes || null, userId);
 
-      const opnameId = header.lastInsertRowid;
+      const opnameId = (header as any).lastInsertRowid;
 
       // 2. Snapshot all physical products
       const products = await db.prepare("SELECT id, quantity FROM products WHERE type = 'physical' AND is_active = 1").all() as any[];
@@ -44,7 +44,7 @@ stockOpnameRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), async
       `);
 
       for (const p of products) {
-        insertItem.run(opnameId, p.id, p.quantity);
+        await insertItem.run(opnameId, p.id, p.quantity);
       }
 
       return opnameId;
@@ -126,7 +126,7 @@ stockOpnameRouter.post('/:id/complete', authMiddleware, roleGuard(['admin', 'own
   const userId = req.user?.id;
 
   try {
-    db.transaction(() => {
+    await db.transaction(async () => {
       const opname = await db.prepare("SELECT status FROM stock_opname WHERE id = ?").get(id) as any;
       if (!opname || opname.status === 'completed') {
         throw new Error('Opname tidak ditemukan atau sudah selesai');
@@ -138,7 +138,7 @@ stockOpnameRouter.post('/:id/complete', authMiddleware, roleGuard(['admin', 'own
         if (item.difference === 0) continue;
 
         // Apply adjustment to products
-        await db.prepare("UPDATE products SET quantity = physical_qty, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        await db.prepare("UPDATE products SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
           .run(item.physical_qty, item.product_id);
 
         // Log adjustment

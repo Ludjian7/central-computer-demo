@@ -43,7 +43,7 @@ returnsRouter.post('/', authMiddleware, async (req: AuthRequest, res: Response) 
     const newStockBalance = saleItem.current_stock + quantity;
 
     // Lakukan retur dalam transaksi
-    const processReturn = db.transaction(() => {
+    const processReturn = db.transaction(async () => {
       // a. Insert retur
       const info = await db.prepare(`
         INSERT INTO returns (sale_id, sale_item_id, product_id, quantity, reason, refund_amount, refund_method, processed_by)
@@ -60,12 +60,10 @@ returnsRouter.post('/', authMiddleware, async (req: AuthRequest, res: Response) 
         VALUES (?, 'in', ?, ?, ?, ?, ?)
       `).run(saleItem.product_id, quantity, newStockBalance, sale_id, `Retur barang INV-${sale_id}`, userId);
 
-      // (Optional) Update sales status to refunded if everything is returned? 
-      // For now, let's just keep the return log and refund status manual or keep it as complete.
       return { returnId, refundAmount, newStockBalance };
     });
 
-    const result = processReturn();
+    const result = await processReturn();
     res.status(201).json({ status: 'success', data: result, message: 'Retur berhasil diproses' });
   } catch (error) {
     console.error(error);

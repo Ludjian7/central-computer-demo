@@ -22,15 +22,13 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const settings = req.body;
-    const update = await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-    
-    const transaction = db.transaction((data) => {
+    const transaction = db.transaction(async (data: any) => {
       for (const [key, value] of Object.entries(data)) {
-        update.run(key, String(value));
+        await db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value').run(key, String(value));
       }
     });
 
-    transaction(settings);
+    await transaction(settings);
     
     res.json({ status: 'success', message: 'Settings updated successfully' });
   } catch (error: any) {

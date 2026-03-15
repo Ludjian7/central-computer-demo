@@ -21,11 +21,12 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
       return;
     }
 
-    const processPO = db.transaction(() => {
+    const processPO = db.transaction(async () => {
       // 1. Generate PO Number (PO-YYYYMMDD-XXXX)
       const date = new Date();
       const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-      const lastPO = await db.prepare("SELECT po_number FROM purchase_orders WHERE po_number LIKE ? ORDER BY id DESC LIMIT 1").get(`PO-${dateStr}-%`) as any;
+      const lastPOs = await (db as any).$queryRawUnsafe("SELECT po_number FROM purchase_orders WHERE po_number LIKE $1 ORDER BY id DESC LIMIT 1", `PO-${dateStr}-%`);
+      const lastPO = (lastPOs as any[])[0];
       
       let seq = 1;
       if (lastPO) {
@@ -43,7 +44,8 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
           throw new Error('Data item PO tidak valid (qty/harga harus > 0)');
         }
         
-        const product = await db.prepare('SELECT type FROM products WHERE id = ?').get(item.product_id) as any;
+        const products = await (db as any).$queryRawUnsafe('SELECT type FROM products WHERE id = $1', item.product_id);
+        const product = (products as any[])[0];
         if (!product || product.type !== 'physical') {
           throw new Error(`Produk ID ${item.product_id} tidak valid atau bukan barang fisik`);
         }
@@ -58,26 +60,26 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
       }
 
       // 3. Insert PO header
-      const poInsertInfo = await db.prepare(`
+      const info = await db.prepare(`
         INSERT INTO purchase_orders (po_number, supplier_id, notes, total_amount, expected_date, created_by)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(poNumber, supplier_id, notes || null, totalAmount, expected_date || null, userId);
-      const poId = poInsert(info as any).lastInsertRowid;
+      const poId = (info as any).lastInsertRowid;
 
       // 4. Insert PO items
-      const insertItem = await db.prepare(`
+      const stmt = await db.prepare(`
         INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost, subtotal)
         VALUES (?, ?, ?, ?, ?)
       `);
 
       for (const item of validItems) {
-        insertItem.run(poId, item.product_id, item.quantity, item.unit_cost, item.subtotal);
+        await stmt.run(poId, item.product_id, item.quantity, item.unit_cost, item.subtotal);
       }
 
       return { poId, poNumber, totalAmount };
     });
 
-    const result = processPO();
+    const result = await processPO();
     res.status(201).json({ status: 'success', data: result, message: 'Purchase Order berhasil dibuat' });
   } catch (error: any) {
     console.error(error);
@@ -196,7 +198,7 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
   }
 
   try {
-    const processReceipt = db.transaction(() => {
+    const processReceipt = db.transaction(async () => {
       const po = await db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
       if (!po) throw new Error('PO tidak ditemukan');
       if (po.status === 'cancelled' || po.status === 'received') {
@@ -226,10 +228,9 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
           }
 
           // Update Product Stock & Cost
-          const currentProduct = await db.prepare('SELECT quantity, cost FROM products WHERE id = ?').get(poItem.product_id) as any;
-          const newStock = currentProduct.quantity + addingQty;
-          // Asumsi cost baru = unit_cost terakhir. Untuk weighted average = ((old_qty * old_cost) + (new_qty * new_cost)) / (old_qty + new_qty)
-          // Simplified: last price in
+          const productRes = await db.prepare('SELECT quantity, cost FROM products WHERE id = ?').get(poItem.product_id) as any;
+          const newStock = productRes.quantity + addingQty;
+          
           await db.prepare('UPDATE products SET quantity = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStock, poItem.unit_cost, poItem.product_id);
 
           // Insert Stock Log
@@ -249,7 +250,6 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
       if (!somethingReceived) throw new Error('Harus ada minimum 1 barang yang diterima');
 
       const finalStatus = everythingReceived ? 'received' : 'partial';
-      const receivedDateStr = finalStatus === 'received' ? "CURRENT_TIMESTAMP" : (po.received_date ? `'${po.received_date}'` : "CURRENT_TIMESTAMP"); // Partial sets first received date too?
 
       // Using JS date string to keep it clean for partial vs full
       await db.prepare(`
@@ -261,7 +261,7 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
       return { status: finalStatus };
     });
 
-    const result = processReceipt();
+    const result = await processReceipt();
     res.json({ status: 'success', data: result, message: 'Penerimaan barang berhasil dicatat' });
   } catch (error: any) {
     console.error(error);

@@ -22,11 +22,11 @@ export const db = {
       }
     };
   },
-  transaction: (fn: any) => prisma.$transaction(tx => fn(tx)),
-  // Also export the raw prisma methods for better refactoring later
+  transaction: (fn: any) => (...args: any[]) => prisma.$transaction((tx) => fn(...args, tx)),
+  $transaction: (fn: any) => prisma.$transaction(fn),
   $queryRawUnsafe: (sql: string, ...params: any[]) => prisma.$queryRawUnsafe(sql, ...params),
   $executeRawUnsafe: (sql: string, ...params: any[]) => prisma.$executeRawUnsafe(sql, ...params),
-  $transaction: (fn: any) => prisma.$transaction(fn),
+  prisma,
   // Accessor for generated models
   user: prisma.user,
   product: prisma.product,
