@@ -46,19 +46,157 @@ reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
       WHERE type = 'physical' AND quantity <= min_quantity AND is_active = true
     `;
 
+    // --- NEW METRICS ---
+
+    // 4. Revenue Produk vs Jasa
+    const whereClause = (start_date && end_date)
+      ? `AND s.created_at >= '${start_date}'::date AND s.created_at < '${end_date}'::date + INTERVAL '1 day'`
+      : `AND s.created_at >= date_trunc('month', NOW())`;
+
+    const revenueByType = await prisma.$queryRawUnsafe(`
+      SELECT p.type, SUM(si.subtotal)::int as revenue
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      JOIN sales s ON si.sale_id = s.id
+      WHERE s.payment_status IN ('paid', 'partial') ${whereClause}
+      GROUP BY p.type
+    `) as any[];
+
+    let productRevenue = 0;
+    let serviceRevenue = 0;
+    revenueByType.forEach(r => {
+      if (r.type === 'physical') productRevenue = r.revenue || 0;
+      if (r.type === 'service') serviceRevenue = r.revenue || 0;
+    });
+
+    // 5. Last Month Revenue (MoM Growth)
+    let startOfLastMonth = new Date();
+    startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1);
+    startOfLastMonth.setDate(1);
+    startOfLastMonth.setHours(0,0,0,0);
+    
+    let endOfLastMonth = new Date();
+    endOfLastMonth.setDate(0);
+    endOfLastMonth.setHours(23,59,59,999);
+
+    const lastMonthReveueAgg = await prisma.sale.aggregate({
+      _sum: { total: true },
+      _count: { id: true },
+      where: {
+        paymentStatus: { in: ['paid', 'partial'] },
+        createdAt: {
+          gte: startOfLastMonth,
+          lte: endOfLastMonth
+        }
+      }
+    });
+
+    const lastMonthRevenue = lastMonthReveueAgg._sum.total ?? 0;
+    const lastMonthTransactions = lastMonthReveueAgg._count.id;
+
+    const currentRevenue = salesAgg._sum.total ?? 0;
+    const revenueGrowthPct = lastMonthRevenue > 0 ? ((currentRevenue - lastMonthRevenue) / lastMonthRevenue) * 100 : 0;
+    const transactionsGrowthPct = lastMonthTransactions > 0 ? ((salesAgg._count.id - lastMonthTransactions) / lastMonthTransactions) * 100 : 0;
+
+    // 6. Pending / Piutang
+    const pendingRevenueAgg = await prisma.sale.aggregate({
+      _sum: { total: true },
+      _count: { id: true },
+      where: { paymentStatus: { in: ['pending'] } }
+    });
+
+    // 7. Service Completion Rate
+    const serviceStats = await prisma.$queryRaw`
+      SELECT 
+        COUNT(*)::int as total,
+        SUM(CASE WHEN service_status = 'completed' THEN 1 ELSE 0 END)::int as completed
+      FROM sale_items
+      WHERE service_technician IS NOT NULL
+    ` as any[];
+    const totalServices = serviceStats[0]?.total || 0;
+    const completedServices = serviceStats[0]?.completed || 0;
+    const serviceCompletionRate = totalServices > 0 ? (completedServices / totalServices) * 100 : 0;
+
+    // 8. Monthly Target
+    let targetSettingStr = '50000000';
+    try {
+      const targetSetting = await prisma.setting.findUnique({ where: { key: 'monthly_target' } });
+      if (targetSetting) targetSettingStr = targetSetting.value;
+    } catch(e) {}
+
     res.json({
       status: 'success',
       data: {
         total_transactions: salesAgg._count.id,
-        total_revenue: salesAgg._sum.total ?? 0,
+        total_revenue: currentRevenue,
         active_services: activeServices,
-        low_stock_items: Number((lowStock[0] as any).count)
+        low_stock_items: Number((lowStock[0] as any).count),
+
+        // NEW FIELDS
+        product_revenue: productRevenue,
+        service_revenue: serviceRevenue,
+        last_month_revenue: lastMonthRevenue,
+        revenue_growth_pct: parseFloat(revenueGrowthPct.toFixed(1)),
+        last_month_transactions: lastMonthTransactions,
+        transactions_growth_pct: parseFloat(transactionsGrowthPct.toFixed(1)),
+        pending_revenue: pendingRevenueAgg._sum.total ?? 0,
+        pending_transactions: pendingRevenueAgg._count.id,
+        service_completion_rate: parseFloat(serviceCompletionRate.toFixed(1)),
+        monthly_target: parseInt(targetSettingStr, 10) || 50000000
       },
       message: 'Ringkasan dashboard berhasil diambil'
     });
   } catch (error) {
     console.error('Summary error:', error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+  }
+});
+
+// GET /api/reports/low-stock - Produk stok menipis actionable
+reportsRouter.get('/low-stock', async (req: AuthRequest, res: Response) => {
+  try {
+    const products = await prisma.$queryRaw`
+      SELECT 
+        id, name, sku, category, brand,
+        quantity as current_stock,
+        min_quantity as min_stock,
+        (min_quantity - quantity)::int as shortage,
+        cost as unit_cost
+      FROM products
+      WHERE type = 'physical' 
+        AND is_active = true
+        AND quantity <= min_quantity
+      ORDER BY (quantity - min_quantity) ASC
+      LIMIT 20
+    `;
+    res.json({ status: 'success', data: products, message: 'Daftar stok menipis berhasil diambil' });
+  } catch (error) {
+    console.error('Low stock error:', error);
+    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Gagal mendapatkan data stok menipis' });
+  }
+});
+
+// GET /api/reports/service-aging - Servis overdue
+reportsRouter.get('/service-aging', async (req: AuthRequest, res: Response) => {
+  const days = parseInt(String(req.query.days || '3'));
+  try {
+    const aging = await prisma.$queryRawUnsafe(`
+      SELECT 
+        si.id, si.product_name, si.service_status, si.service_schedule,
+        s.customer_name, s.customer_phone, s.invoice_number,
+        u.username as technician_name,
+        EXTRACT(DAY FROM NOW() - si.service_schedule)::int as age_days
+      FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      LEFT JOIN users u ON si.service_technician = u.id
+      WHERE si.service_status IN ('scheduled', 'in_progress')
+        AND si.service_schedule < NOW() - INTERVAL '${days} days'
+      ORDER BY si.service_schedule ASC
+    `);
+    res.json({ status: 'success', data: aging, message: 'Data aging service berhasil diambil' });
+  } catch (error) {
+    console.error('Service aging error:', error);
+    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Gagal mendapatkan data service aging' });
   }
 });
 
