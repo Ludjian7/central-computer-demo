@@ -9,13 +9,25 @@ reportsRouter.use(authMiddleware, roleGuard(['admin', 'owner']));
 
 // Helper to build date range filter
 function buildDateWhere(start_date?: string, end_date?: string) {
-  if (start_date && end_date) {
-    return {
-      gte: new Date(`${start_date}T00:00:00.000Z`),
-      lte: new Date(`${end_date}T23:59:59.999Z`)
-    };
+  let finalStart = start_date;
+  let finalEnd = end_date;
+
+  // Jika tidak ada parameter date, default ke bulan ini
+  if (!start_date || !end_date) {
+    const now = new Date();
+    // Start of current month
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    // End of current month
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    finalStart = firstDay.toISOString().split('T')[0];
+    finalEnd = lastDay.toISOString().split('T')[0];
   }
-  return undefined;
+
+  return {
+    gte: new Date(`${finalStart}T00:00:00.000Z`),
+    lte: new Date(`${finalEnd}T23:59:59.999Z`)
+  };
 }
 
 // GET /api/reports/summary - Ringkasan Dashboard
@@ -23,7 +35,7 @@ reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
   const { start_date, end_date } = req.query as any;
   try {
     const dateWhere = buildDateWhere(start_date, end_date);
-    const createdAtFilter = dateWhere ? { createdAt: dateWhere } : {};
+    const createdAtFilter = { createdAt: dateWhere };
 
     // 1. Total Pendapatan & Jumlah Transaksi
     const salesAgg = await prisma.sale.aggregate({
@@ -49,9 +61,15 @@ reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
     // --- NEW METRICS ---
 
     // 4. Revenue Produk vs Jasa
-    const whereClause = (start_date && end_date)
-      ? `AND s.created_at >= '${start_date}'::date AND s.created_at < '${end_date}'::date + INTERVAL '1 day'`
-      : `AND s.created_at >= date_trunc('month', NOW())`;
+    // Kita bisa ambil string ISO dari dateWhere yang sudah dipastikan ada isinya
+    const startIso = dateWhere.gte.toISOString().replace('T', ' ').replace('Z', '');
+    const endIso = dateWhere.lte.toISOString().replace('T', ' ').replace('Z', '');
+    
+    // Convert to exactly PostgreSQL format
+    const startStr = startIso.split('.')[0];
+    const endStr = endIso.split('.')[0];
+
+    const whereClause = `AND s.created_at >= '${startStr}'::timestamp AND s.created_at <= '${endStr}'::timestamp`;
 
     const revenueByType = await prisma.$queryRawUnsafe(`
       SELECT p.type, SUM(si.subtotal)::int as revenue
@@ -106,13 +124,16 @@ reportsRouter.get('/summary', async (req: AuthRequest, res: Response) => {
     });
 
     // 7. Service Completion Rate
-    const serviceStats = await prisma.$queryRaw`
+    // Filter services based on the same date frame
+    const serviceStats = await prisma.$queryRawUnsafe(`
       SELECT 
         COUNT(*)::int as total,
-        SUM(CASE WHEN service_status = 'completed' THEN 1 ELSE 0 END)::int as completed
-      FROM sale_items
-      WHERE service_technician IS NOT NULL
-    ` as any[];
+        SUM(CASE WHEN si.service_status = 'completed' THEN 1 ELSE 0 END)::int as completed
+      FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      WHERE si.service_technician IS NOT NULL
+      ${whereClause}
+    `) as any[];
     const totalServices = serviceStats[0]?.total || 0;
     const completedServices = serviceStats[0]?.completed || 0;
     const serviceCompletionRate = totalServices > 0 ? (completedServices / totalServices) * 100 : 0;
