@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, AuthRequest } from '../middleware/auth.js';
 
 export const authRouter = Router();
@@ -17,7 +17,7 @@ authRouter.post('/login', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const user = await (db as any).user.findUnique({ 
+    const user = await prisma.user.findUnique({ 
       where: { username, isActive: true } 
     });
     
@@ -60,7 +60,7 @@ authRouter.post('/logout', authMiddleware, (req: AuthRequest, res: Response) => 
 // GET /api/auth/me
 authRouter.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const user = await (db as any).user.findUnique({ 
+    const user = await prisma.user.findUnique({ 
       where: { id: req.user?.id } 
     });
     if (!user || !user.isActive) {
@@ -79,7 +79,7 @@ authRouter.get('/me', authMiddleware, async (req: AuthRequest, res: Response) =>
 // GET /api/auth/users
 authRouter.get('/users', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const users = await (db as any).user.findMany({
+    const users = await prisma.user.findMany({
       where: { isActive: true },
       select: { id: true, username: true, email: true, role: true, isActive: true }
     });
@@ -100,8 +100,10 @@ authRouter.patch('/change-password', authMiddleware, async (req: AuthRequest, re
   }
 
   try {
-    const user = await (db as any).user.findUnique({ 
-      where: { id: req.user?.id },
+    if (!req.user?.id) throw new Error('User context missing');
+
+    const user = await prisma.user.findUnique({ 
+      where: { id: req.user.id },
       select: { passwordHash: true }
     });
     
@@ -117,8 +119,8 @@ authRouter.patch('/change-password', authMiddleware, async (req: AuthRequest, re
     }
 
     const newHash = bcrypt.hashSync(new_password, 10);
-    await (db as any).user.update({
-      where: { id: req.user?.id },
+    await prisma.user.update({
+      where: { id: req.user.id },
       data: { passwordHash: newHash }
     });
 
@@ -128,3 +130,4 @@ authRouter.patch('/change-password', authMiddleware, async (req: AuthRequest, re
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+

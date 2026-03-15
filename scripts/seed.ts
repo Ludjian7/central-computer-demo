@@ -10,8 +10,8 @@ async function main() {
   console.log('Sedang membuat pengaturan dasar...');
   await prisma.setting.upsert({
     where: { key: 'monthly_target' },
-    update: { value: '150000000' },
-    create: { key: 'monthly_target', value: '150000000' }
+    update: { value: '1700000000' },
+    create: { key: 'monthly_target', value: '1700000000' }
   });
 
   // --- 2. USERS (Roles) ---
@@ -71,9 +71,13 @@ async function main() {
   for (let i = 0; i < 25; i++) {
     const minQty = faker.number.int({ min: 2, max: 10 });
     // Sengaja buat beberapa stok menipis (< minQty)
-    const qty = faker.number.int({ min: 0, max: 5 }) < 2 
-      ? faker.number.int({ min: 0, max: minQty }) 
-      : faker.number.int({ min: minQty + 1, max: 50 });
+    const qtyRand = Math.random();
+    let qty = 0;
+    if (qtyRand > 0.9) {
+      qty = faker.number.int({ min: 0, max: minQty - 1 }); // Low stock
+    } else {
+      qty = faker.number.int({ min: minQty + 1, max: 100 }); // Normal stock
+    }
       
     const p = await prisma.product.create({
       data: {
@@ -114,12 +118,12 @@ async function main() {
     serviceProducts.push(s);
   }
 
-  // --- 6. TRANSAKSI (SALES & SERVICES) SEPANJANG 45 HARI TERAKHIR ---
+  // --- 6. TRANSAKSI (SALES & SERVICES) SEPANJANG 30 HARI TERAKHIR ---
   console.log('Sedang mengisi riwayat transaksi, laporan keuangan, & penjadwalan servis teknisi (proses ini memakan waktu beberapa detik)...');
   
-  for (let i = 0; i < 60; i++) {
-    // Tanggal acak dalam 45 hari terakhir
-    const pastDate = faker.date.recent({ days: 45 });
+  for (let i = 0; i < 75; i++) {
+    // Tanggal acak dalam 30 hari terakhir (agar terkonsentrasi di bulan berjalan)
+    const pastDate = faker.date.recent({ days: 30 });
     
     // Status Pembayaran Acak. Bikin beberapa pending/partial
     const paymentRand = Math.random();
@@ -180,12 +184,14 @@ async function main() {
       const subtotal = srvProd.price * 1; // qty slalu 1 utk jasa
       saleTotal += subtotal;
 
-      // Logic "Aging Service" (jika diauthor lebih dari 2 hari lalu & belum selesai)
-      const isPast = pastDate.getTime() < Date.now() - (2 * 24 * 60 * 60 * 1000); // 2 hari lalu
+      // Logic "Aging Service" (jika dibuat lebih dari 3 hari lalu & belum selesai)
+      const isOverdue = pastDate.getTime() < Date.now() - (3 * 24 * 60 * 60 * 1000);
       let servStatus = faker.helpers.arrayElement(['scheduled', 'in_progress', 'completed', 'cancelled']);
       
-      // Paksa beberapa supaya jadi aging
-      if (isPast && Math.random() > 0.5) servStatus = 'in_progress';
+      // Paksa beberapa supaya jadi overdue demo
+      if (isOverdue && Math.random() > 0.4) {
+        servStatus = faker.helpers.arrayElement(['scheduled', 'in_progress']);
+      }
 
       const technicianId = faker.helpers.arrayElement(technicians).id;
 

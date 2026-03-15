@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 
 export const suppliersRouter = Router();
@@ -7,7 +7,10 @@ export const suppliersRouter = Router();
 // GET /api/suppliers - Daftar supplier (semua role)
 suppliersRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const suppliers = await db.prepare('SELECT * FROM suppliers WHERE is_active = 1 ORDER BY name ASC').all();
+    const suppliers = await prisma.supplier.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' }
+    });
     res.json({ status: 'success', data: suppliers, message: 'Daftar supplier berhasil diambil' });
   } catch (error) {
     console.error(error);
@@ -25,15 +28,22 @@ suppliersRouter.post('/', authMiddleware, roleGuard(['admin']), async (req: Auth
   }
 
   try {
-    const stmt = db.prepare(`
-      INSERT INTO suppliers (name, contact_person, email, phone, address, city, postal_code, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const info = await stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null);
+    const supplier = await prisma.supplier.create({
+      data: {
+        name,
+        contactPerson: contact_person,
+        email: email || null,
+        phone,
+        address: address || null,
+        city,
+        postalCode: postal_code || null,
+        notes: notes || null
+      }
+    });
     
     res.status(201).json({ 
       status: 'success', 
-      data: { id: (info as any).lastInsertRowid }, 
+      data: { id: supplier.id }, 
       message: 'Supplier berhasil ditambahkan' 
     });
   } catch (error) {
@@ -47,17 +57,23 @@ suppliersRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Respon
   const { id } = req.params;
 
   try {
-    const supplier = await db.prepare('SELECT * FROM suppliers WHERE id = ? AND is_active = 1').get(id) as any;
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: parseInt(id), isActive: true },
+      include: {
+        products: {
+          where: { isActive: true }
+        }
+      }
+    });
+
     if (!supplier) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
     }
 
-    const products = await db.prepare('SELECT * FROM products WHERE supplier_id = ? AND is_active = 1').all(id);
-
     res.json({ 
       status: 'success', 
-      data: { ...supplier, products }, 
+      data: supplier, 
       message: 'Detail supplier berhasil diambil' 
     });
   } catch (error) {
@@ -77,22 +93,28 @@ suppliersRouter.put('/:id', authMiddleware, roleGuard(['admin']), async (req: Au
   }
 
   try {
-    const stmt = db.prepare(`
-      UPDATE suppliers 
-      SET name = ?, contact_person = ?, email = ?, phone = ?, address = ?, city = ?, postal_code = ?, notes = ?
-      WHERE id = ? AND is_active = 1
-    `);
-    const info = await stmt.run(name, contact_person, email || null, phone, address || null, city, postal_code || null, notes || null, id);
-    
-    if ((info as any).changes === 0) {
-      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
-      return;
-    }
+    const supplier = await prisma.supplier.update({
+      where: { id: parseInt(id) },
+      data: {
+        name,
+        contactPerson: contact_person,
+        email: email || null,
+        phone,
+        address: address || null,
+        city,
+        postalCode: postal_code || null,
+        notes: notes || null
+      }
+    });
 
     res.json({ status: 'success', data: null, message: 'Supplier berhasil diupdate' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    if ((error as any).code === 'P2025') {
+      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
+    } else {
+      res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    }
   }
 });
 
@@ -101,10 +123,13 @@ suppliersRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), a
   const { id } = req.params;
 
   try {
+    const supplierId = parseInt(id);
     // Cek apakah ada produk aktif yang berelasi dengan supplier ini
-    const activeProducts = await db.prepare('SELECT COUNT(*) as count FROM products WHERE supplier_id = ? AND is_active = 1').get(id) as { count: number | bigint };
+    const activeProductsCount = await prisma.product.count({
+      where: { supplierId, isActive: true }
+    });
     
-    if (Number(activeProducts.count) > 0) {
+    if (activeProductsCount > 0) {
       res.status(400).json({ 
         status: 'error', 
         code: 'BAD_REQUEST', 
@@ -113,16 +138,19 @@ suppliersRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), a
       return;
     }
 
-    const info = await db.prepare('UPDATE suppliers SET is_active = 0 WHERE id = ?').run(id);
-    
-    if ((info as any).changes === 0) {
-      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
-      return;
-    }
+    await prisma.supplier.update({
+      where: { id: supplierId },
+      data: { isActive: false }
+    });
 
     res.json({ status: 'success', data: null, message: 'Supplier berhasil dinonaktifkan' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    if ((error as any).code === 'P2025') {
+      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
+    } else {
+      res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    }
   }
 });
+

@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 
 export const productsRouter = Router();
 
 // GET /api/products - Daftar produk aktif (semua role)
 productsRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const { type, category, low_stock, q } = req.query;
+  const { type, category, low_stock, q } = req.query as any;
 
   try {
     const where: any = { isActive: true };
@@ -16,47 +16,28 @@ productsRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) 
     }
 
     if (category) {
-      where.category = category as string;
+      where.category = category;
     }
 
-    if (low_stock === 'true') {
-      where.type = 'physical';
-      where.quantity = { lte: { name: 'minQuantity' } }; // This is complex in prisma, better use raw for this one or refine
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { sku: { contains: q, mode: 'insensitive' } }
+      ];
     }
 
-    // Since the original has complex logic, let's use Prisma findMany for simple filters
-    // and fallback to raw if needed. For now, let's refactor to standard Prisma for better reliability.
-    
     let products;
-    if (low_stock === 'true' || q) {
-      // Fallback to raw for complex search/comparisons for speed in migration
-      let query = 'SELECT * FROM products WHERE is_active = true';
-      const params: any[] = [];
-      let paramCount = 1;
-
-      if (type === 'physical' || type === 'service') {
-        query += ` AND type = $${paramCount++}`;
-        params.push(type);
-      }
-
-      if (category) {
-        query += ` AND category = $${paramCount++}`;
-        params.push(category);
-      }
-
-      if (low_stock === 'true') {
-        query += " AND type = 'physical' AND quantity <= min_quantity";
-      }
-
-      if (q) {
-        query += ` AND (name ILIKE $${paramCount} OR sku ILIKE $${paramCount})`;
-        params.push(`%${q}%`);
-      }
-
-      query += ' ORDER BY name ASC';
-      products = await (db as any).$queryRawUnsafe(query, ...params);
+    if (low_stock === 'true') {
+      // Use raw query for low stock comparison
+      products = await prisma.$queryRaw`
+        SELECT * FROM products 
+        WHERE type = 'physical' 
+          AND quantity <= min_quantity 
+          AND is_active = true
+        ORDER BY name ASC
+      `;
     } else {
-      products = await (db as any).product.findMany({
+      products = await prisma.product.findMany({
         where,
         orderBy: { name: 'asc' }
       });
@@ -72,7 +53,7 @@ productsRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) 
 // GET /api/products/low-stock - Produk stok menipis dengan info supplier
 productsRouter.get('/low-stock', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const products = await (db as any).$queryRawUnsafe(`
+    const products = await prisma.$queryRaw`
       SELECT p.*, s.name as supplier_name
       FROM products p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -80,7 +61,7 @@ productsRouter.get('/low-stock', authMiddleware, async (req: AuthRequest, res: R
         AND p.quantity <= p.min_quantity 
         AND p.is_active = true
       ORDER BY p.quantity ASC
-    `);
+    `;
     
     res.json({ status: 'success', data: products, message: 'Daftar stok menipis berhasil diambil' });
   } catch (error) {
@@ -98,36 +79,31 @@ productsRouter.post('/', authMiddleware, roleGuard(['admin']), async (req: AuthR
     return;
   }
 
-  if (type !== 'physical' && type !== 'service') {
-    res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Type harus physical atau service' });
-    return;
-  }
-
   try {
     // Cek SKU unik
-    const existingSku = await (db as any).product.findUnique({ where: { sku } });
+    const existingSku = await prisma.product.findUnique({ where: { sku } });
     if (existingSku) {
       res.status(400).json({ status: 'error', code: 'DUPLICATE_SKU', message: 'SKU sudah digunakan' });
       return;
     }
 
-    const product = await (db as any).product.create({
+    const product = await prisma.product.create({
       data: {
         name,
         description: description || null,
         type,
         sku,
         barcode: barcode || null,
-        price: Number(price),
-        cost: Number(cost || 0),
-        quantity: type === 'physical' ? Number(quantity || 0) : 0,
-        minQuantity: type === 'physical' ? Number(min_quantity || 2) : 2,
+        price: parseInt(price),
+        cost: parseInt(cost || 0),
+        quantity: type === 'physical' ? parseInt(quantity || 0) : 0,
+        minQuantity: type === 'physical' ? parseInt(min_quantity || 2) : 2,
         category,
         brand: brand || null,
         location: location || null,
-        durationMinutes: type === 'service' ? Number(duration_minutes || null) : null,
+        durationMinutes: type === 'service' ? parseInt(duration_minutes || null) : null,
         serviceDetails: type === 'service' ? (service_details || null) : null,
-        supplierId: supplier_id || null
+        supplierId: supplier_id ? parseInt(supplier_id) : null
       }
     });
 
@@ -143,7 +119,7 @@ productsRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Respons
   const { id } = req.params;
 
   try {
-    const product = await (db as any).product.findFirst({ 
+    const product = await prisma.product.findFirst({ 
       where: { id: parseInt(id), isActive: true } 
     });
     
@@ -169,35 +145,34 @@ productsRouter.put('/:id', authMiddleware, roleGuard(['admin']), async (req: Aut
   }
 
   try {
-    const product = await (db as any).product.updateMany({
-      where: { id: parseInt(id), isActive: true },
+    const product = await prisma.product.update({
+      where: { id: parseInt(id) },
       data: {
         name,
         description: description || null,
         type,
         barcode: barcode || null,
-        price: Number(price),
-        cost: Number(cost || 0),
-        quantity: type === 'physical' ? Number(quantity || 0) : 0,
-        minQuantity: type === 'physical' ? Number(min_quantity || 2) : 2,
+        price: parseInt(price),
+        cost: parseInt(cost || 0),
+        quantity: type === 'physical' ? parseInt(quantity || 0) : 0,
+        minQuantity: type === 'physical' ? parseInt(min_quantity || 2) : 2,
         category,
         brand: brand || null,
         location: location || null,
-        durationMinutes: type === 'service' ? Number(duration_minutes || null) : null,
+        durationMinutes: type === 'service' ? parseInt(duration_minutes || null) : null,
         serviceDetails: type === 'service' ? (service_details || null) : null,
-        supplierId: supplier_id || null
+        supplierId: supplier_id ? parseInt(supplier_id) : null
       }
     });
-
-    if (product.count === 0) {
-      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
-      return;
-    }
 
     res.json({ status: 'success', data: null, message: 'Produk berhasil diupdate' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    if ((error as any).code === 'P2025') {
+      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
+    } else {
+      res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    }
   }
 });
 
@@ -206,10 +181,11 @@ productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), as
   const { id } = req.params;
 
   try {
+    const productId = parseInt(id);
     // Cek apakah ada sale_items dengan service_status in_progress atau scheduled
-    const activeServicesCount = await (db as any).saleItem.count({
+    const activeServicesCount = await prisma.saleItem.count({
       where: {
-        productId: parseInt(id),
+        productId,
         serviceStatus: { in: ['scheduled', 'in_progress'] }
       }
     });
@@ -223,20 +199,19 @@ productsRouter.patch('/:id/deactivate', authMiddleware, roleGuard(['admin']), as
       return;
     }
 
-    const info = await (db as any).product.updateMany({
-      where: { id: parseInt(id) },
+    await prisma.product.update({
+      where: { id: productId },
       data: { isActive: false }
     });
     
-    if (info.count === 0) {
-      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
-      return;
-    }
-
     res.json({ status: 'success', data: null, message: 'Produk berhasil dinonaktifkan' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    if ((error as any).code === 'P2025') {
+      res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Produk tidak ditemukan' });
+    } else {
+      res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
+    }
   }
 });
 
@@ -252,8 +227,9 @@ productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), async 
   }
 
   try {
-    const product = await (db as any).product.findFirst({
-      where: { id: parseInt(id), isActive: true },
+    const productId = parseInt(id);
+    const product = await prisma.product.findUnique({
+      where: { id: productId, isActive: true },
       select: { type: true, quantity: true }
     });
     
@@ -267,24 +243,24 @@ productsRouter.post('/:id/restock', authMiddleware, roleGuard(['admin']), async 
       return;
     }
 
-    const newBalance = product.quantity + quantity;
+    const newBalance = product.quantity + parseInt(quantity);
 
     // Use Prisma transaction
-    await (db as any).$transaction(async (tx: any) => {
+    await prisma.$transaction(async (tx) => {
       // 1. Update quantity di tabel products
       await tx.product.update({
-        where: { id: parseInt(id) },
+        where: { id: productId },
         data: { quantity: newBalance }
       });
       
       // 2. Insert ke stock_logs
       await tx.stockLog.create({
         data: {
-          productId: parseInt(id),
+          productId,
           type: 'in',
-          quantity,
+          quantity: parseInt(quantity),
           balance: newBalance,
-          supplierId: supplier_id || null,
+          supplierId: supplier_id ? parseInt(supplier_id) : null,
           notes: notes || null,
           userId: userId!
         }
@@ -303,18 +279,26 @@ productsRouter.get('/:id/stock-log', authMiddleware, async (req: AuthRequest, re
   const { id } = req.params;
 
   try {
-    const logs = await (db as any).$queryRawUnsafe(`
-      SELECT sl.*, u.username, s.name as supplier_name 
-      FROM stock_logs sl
-      LEFT JOIN users u ON sl.user_id = u.id
-      LEFT JOIN suppliers s ON sl.supplier_id = s.id
-      WHERE sl.product_id = $1
-      ORDER BY sl.created_at DESC
-    `, parseInt(id));
+    const logs = await prisma.stockLog.findMany({
+      where: { productId: parseInt(id) },
+      include: {
+        user: { select: { username: true } },
+        supplier: { select: { name: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    res.json({ status: 'success', data: logs, message: 'Riwayat stok berhasil diambil' });
+    // Format for frontend
+    const formattedLogs = logs.map(l => ({
+      ...l,
+      username: l.user.username,
+      supplier_name: l.supplier?.name || null
+    }));
+
+    res.json({ status: 'success', data: formattedLogs, message: 'Riwayat stok berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+

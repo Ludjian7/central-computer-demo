@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, AuthRequest, roleGuard } from '../middleware/auth.js';
 
 export const purchaseOrdersRouter = Router();
@@ -9,29 +9,38 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
   const { supplier_id, expected_date, notes, items } = req.body;
   const userId = req.user?.id;
 
-  if (!supplier_id || !items || !Array.isArray(items) || items.length === 0) {
+  if (!supplier_id || !items || !Array.isArray(items) || items.length === 0 || userId === undefined) {
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Supplier dan item barang harus diisi' });
     return;
   }
 
   try {
-    const supplier = await db.prepare('SELECT id FROM suppliers WHERE id = ?').get(supplier_id);
+    const supplierId = parseInt(supplier_id);
+    const supplier = await prisma.supplier.findUnique({
+      where: { id: supplierId }
+    });
     if (!supplier) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Supplier tidak ditemukan' });
       return;
     }
 
-    const processPO = db.transaction(async () => {
+    const result = await prisma.$transaction(async (tx) => {
       // 1. Generate PO Number (PO-YYYYMMDD-XXXX)
-      const date = new Date();
-      const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-      const lastPOs = await (db as any).$queryRawUnsafe("SELECT po_number FROM purchase_orders WHERE po_number LIKE $1 ORDER BY id DESC LIMIT 1", `PO-${dateStr}-%`);
-      const lastPO = (lastPOs as any[])[0];
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${year}${month}${day}`;
+      
+      const lastPO = await tx.purchaseOrder.findFirst({
+        where: { poNumber: { startsWith: `PO-${dateStr}-` } },
+        orderBy: { id: 'desc' }
+      });
       
       let seq = 1;
       if (lastPO) {
-        const lastSeq = parseInt(lastPO.po_number.split('-')[2], 10);
-        seq = lastSeq + 1;
+        const parts = lastPO.poNumber.split('-');
+        seq = parseInt(parts[parts.length - 1], 10) + 1;
       }
       const poNumber = `PO-${dateStr}-${seq.toString().padStart(4, '0')}`;
 
@@ -44,42 +53,55 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
           throw new Error('Data item PO tidak valid (qty/harga harus > 0)');
         }
         
-        const products = await (db as any).$queryRawUnsafe('SELECT type FROM products WHERE id = $1', item.product_id);
-        const product = (products as any[])[0];
+        const productId = parseInt(item.product_id);
+        const product = await tx.product.findUnique({
+          where: { id: productId }
+        });
+
         if (!product || product.type !== 'physical') {
           throw new Error(`Produk ID ${item.product_id} tidak valid atau bukan barang fisik`);
         }
 
-        const subtotal = item.quantity * item.unit_cost;
+        const subtotal = parseInt(item.quantity) * parseInt(item.unit_cost);
         totalAmount += subtotal;
         
         validItems.push({
-          ...item,
+          productId,
+          quantity: parseInt(item.quantity),
+          unitCost: parseInt(item.unit_cost),
           subtotal
         });
       }
 
       // 3. Insert PO header
-      const info = await db.prepare(`
-        INSERT INTO purchase_orders (po_number, supplier_id, notes, total_amount, expected_date, created_by)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(poNumber, supplier_id, notes || null, totalAmount, expected_date || null, userId);
-      const poId = (info as any).lastInsertRowid;
+      const po = await tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          supplierId,
+          notes: notes || null,
+          totalAmount,
+          expectedDate: expected_date ? new Date(expected_date) : null,
+          createdBy: userId,
+          status: 'draft'
+        }
+      });
 
       // 4. Insert PO items
-      const stmt = await db.prepare(`
-        INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost, subtotal)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-
       for (const item of validItems) {
-        await stmt.run(poId, item.product_id, item.quantity, item.unit_cost, item.subtotal);
+        await tx.purchaseOrderItem.create({
+          data: {
+            poId: po.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            subtotal: item.subtotal
+          }
+        });
       }
 
-      return { poId, poNumber, totalAmount };
+      return { poId: po.id, poNumber, totalAmount };
     });
 
-    const result = await processPO();
     res.status(201).json({ status: 'success', data: result, message: 'Purchase Order berhasil dibuat' });
   } catch (error: any) {
     console.error(error);
@@ -89,35 +111,36 @@ purchaseOrdersRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), as
 
 // GET /api/purchase-orders - List
 purchaseOrdersRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const { status, supplier_id, start_date, end_date } = req.query;
+  const { status, supplier_id, start_date, end_date } = req.query as any;
 
   try {
-    let query = `
-      SELECT po.*, s.name as supplier_name, u.username as created_by_name
-      FROM purchase_orders po
-      LEFT JOIN suppliers s ON po.supplier_id = s.id
-      LEFT JOIN users u ON po.created_by = u.id
-      WHERE 1=1
-    `;
-    const params: any[] = [];
-
-    if (status) {
-      query += ` AND po.status = ?`;
-      params.push(status);
-    }
-    if (supplier_id) {
-      query += ` AND po.supplier_id = ?`;
-      params.push(supplier_id);
-    }
+    const where: any = {};
+    if (status) where.status = status;
+    if (supplier_id) where.supplierId = parseInt(supplier_id);
     if (start_date && end_date) {
-      query += ` AND date(po.created_at) BETWEEN ? AND ?`;
-      params.push(start_date, end_date);
+      where.createdAt = {
+        gte: new Date(`${start_date}T00:00:00.000Z`),
+        lte: new Date(`${end_date}T23:59:59.999Z`)
+      };
     }
 
-    query += ` ORDER BY po.created_at DESC`;
+    const pos = await prisma.purchaseOrder.findMany({
+      where,
+      include: {
+        supplier: { select: { name: true } },
+        creator: { select: { username: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-    const pos = await db.prepare(query).all(...params);
-    res.json({ status: 'success', data: pos, message: 'Daftar PO berhasil diambil' });
+    // Format for frontend
+    const formattedPOs = pos.map(p => ({
+      ...p,
+      supplier_name: p.supplier.name,
+      created_by_name: p.creator.username
+    }));
+
+    res.json({ status: 'success', data: formattedPOs, message: 'Daftar PO berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -129,34 +152,44 @@ purchaseOrdersRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: R
   const { id } = req.params;
 
   try {
-    const po = await db.prepare(`
-      SELECT po.*, s.name as supplier_name, u.username as created_by_name
-      FROM purchase_orders po
-      LEFT JOIN suppliers s ON po.supplier_id = s.id
-      LEFT JOIN users u ON po.created_by = u.id
-      WHERE po.id = ?
-    `).get(id);
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        supplier: { select: { name: true } },
+        creator: { select: { username: true } },
+        items: {
+          include: {
+            product: { select: { name: true, sku: true } }
+          }
+        }
+      }
+    });
 
     if (!po) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'PO tidak ditemukan' });
       return;
     }
 
-    const items = await db.prepare(`
-      SELECT poi.*, p.name as product_name, p.sku
-      FROM purchase_order_items poi
-      JOIN products p ON poi.product_id = p.id
-      WHERE poi.po_id = ?
-    `).all(id);
+    // Format for frontend
+    const formattedDetails = {
+      ...po,
+      supplier_name: po.supplier.name,
+      created_by_name: po.creator.username,
+      items: po.items.map(i => ({
+        ...i,
+        product_name: i.product.name,
+        sku: i.product.sku
+      }))
+    };
 
-    res.json({ status: 'success', data: { ...po, items }, message: 'Detail PO berhasil diambil' });
+    res.json({ status: 'success', data: formattedDetails, message: 'Detail PO berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
 
-// PATCH /api/purchase-orders/:id/status - Update Status (misal: draft -> sent -> cancelled)
+// PATCH /api/purchase-orders/:id/status - Update Status
 purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -167,7 +200,12 @@ purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'o
   }
 
   try {
-    const po = await db.prepare('SELECT status FROM purchase_orders WHERE id = ?').get(id) as any;
+    const poId = parseInt(id);
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: poId },
+      select: { status: true }
+    });
+
     if (!po) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'PO tidak ditemukan' });
       return;
@@ -178,7 +216,11 @@ purchaseOrdersRouter.patch('/:id/status', authMiddleware, roleGuard(['admin', 'o
       return;
     }
 
-    await db.prepare('UPDATE purchase_orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
+    await prisma.purchaseOrder.update({
+      where: { id: poId },
+      data: { status }
+    });
+
     res.json({ status: 'success', message: 'Status PO diperbarui' });
   } catch (error) {
     console.error(error);
@@ -192,14 +234,19 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
   const { received_items } = req.body; // Array of { id: po_item_id, received_qty: number }
   const userId = req.user?.id;
 
-  if (!received_items || !Array.isArray(received_items) || received_items.length === 0) {
+  if (!received_items || !Array.isArray(received_items) || received_items.length === 0 || userId === undefined) {
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Item penerimaan barang wajib diisi' });
     return;
   }
 
   try {
-    const processReceipt = db.transaction(async () => {
-      const po = await db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
+    const poId = parseInt(id);
+    const result = await prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.findUnique({
+        where: { id: poId },
+        include: { items: true }
+      });
+
       if (!po) throw new Error('PO tidak ditemukan');
       if (po.status === 'cancelled' || po.status === 'received') {
         throw new Error(`Tidak bisa menerima barang untuk PO dengan status ${po.status}`);
@@ -208,40 +255,59 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
       let everythingReceived = true;
       let somethingReceived = false;
 
-      const poItems = await db.prepare('SELECT * FROM purchase_order_items WHERE po_id = ?').all(id) as any[];
-
-      for (const poItem of poItems) {
+      for (const poItem of po.items) {
         const receiptInput = received_items.find((r: any) => r.id === poItem.id);
         if (receiptInput && receiptInput.received_qty > 0) {
-          const addingQty = receiptInput.received_qty;
-          const newReceivedTotal = poItem.received_qty + addingQty;
+          const addingQty = parseInt(receiptInput.received_qty);
+          const newReceivedTotal = poItem.receivedQty + addingQty;
 
           if (newReceivedTotal > poItem.quantity) {
-             throw new Error(`Toleransi penerimaan melebihi pesanan untuk Produk ID ${poItem.product_id}`);
+             throw new Error(`Toleransi penerimaan melebihi pesanan untuk Produk ID ${poItem.productId}`);
           }
 
           // Update PO Item
-          await db.prepare('UPDATE purchase_order_items SET received_qty = ? WHERE id = ?').run(newReceivedTotal, poItem.id);
+          await tx.purchaseOrderItem.update({
+            where: { id: poItem.id },
+            data: { receivedQty: newReceivedTotal }
+          });
           
           if (newReceivedTotal < poItem.quantity) {
              everythingReceived = false;
           }
 
           // Update Product Stock & Cost
-          const productRes = await db.prepare('SELECT quantity, cost FROM products WHERE id = ?').get(poItem.product_id) as any;
-          const newStock = productRes.quantity + addingQty;
+          const product = await tx.product.findUnique({
+            where: { id: poItem.productId },
+            select: { quantity: true }
+          });
+
+          if (!product) throw new Error(`Produk ID ${poItem.productId} tidak ditemukan`);
+
+          const newStock = product.quantity + addingQty;
           
-          await db.prepare('UPDATE products SET quantity = ?, cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStock, poItem.unit_cost, poItem.product_id);
+          await tx.product.update({
+            where: { id: poItem.productId },
+            data: { 
+              quantity: newStock, 
+              cost: poItem.unitCost 
+            }
+          });
 
           // Insert Stock Log
-          await db.prepare(`
-            INSERT INTO stock_logs (product_id, type, quantity, balance, notes, user_id)
-            VALUES (?, 'in', ?, ?, ?, ?)
-          `).run(poItem.product_id, addingQty, newStock, `Goods Receipt PO ${po.po_number}`, userId);
+          await tx.stockLog.create({
+            data: {
+              productId: poItem.productId,
+              type: 'in',
+              quantity: addingQty,
+              balance: newStock,
+              notes: `Goods Receipt PO ${po.poNumber}`,
+              userId: userId
+            }
+          });
 
           somethingReceived = true;
         } else {
-           if (poItem.received_qty < poItem.quantity) {
+           if (poItem.receivedQty < poItem.quantity) {
               everythingReceived = false;
            }
         }
@@ -251,21 +317,22 @@ purchaseOrdersRouter.post('/:id/receive', authMiddleware, roleGuard(['admin', 'o
 
       const finalStatus = everythingReceived ? 'received' : 'partial';
 
-      // Using JS date string to keep it clean for partial vs full
-      await db.prepare(`
-          UPDATE purchase_orders 
-          SET status = ?, received_date = COALESCE(received_date, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
-          WHERE id = ?
-      `).run(finalStatus, id);
+      await tx.purchaseOrder.update({
+        where: { id: poId },
+        data: { 
+          status: finalStatus,
+          receivedDate: po.receivedDate || new Date()
+        }
+      });
 
       return { status: finalStatus };
     });
 
-    const result = await processReceipt();
     res.json({ status: 'success', data: result, message: 'Penerimaan barang berhasil dicatat' });
   } catch (error: any) {
     console.error(error);
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: error.message || 'Gagal mencatat penerimaan barang' });
   }
 });
+
 

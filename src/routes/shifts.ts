@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 
 export const shiftsRouter = Router();
@@ -7,12 +7,19 @@ export const shiftsRouter = Router();
 // GET /api/shifts/current - Cek shift aktif user saat ini
 shiftsRouter.get('/current', authMiddleware, async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
+  if (!userId) {
+    res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    return;
+  }
+
   try {
-    const shift = await db.prepare(`
-      SELECT * FROM cash_shifts 
-      WHERE user_id = ? AND status = 'open' 
-      ORDER BY opened_at DESC LIMIT 1
-    `).get(userId);
+    const shift = await prisma.cashShift.findFirst({
+      where: { 
+        userId,
+        status: 'open' 
+      },
+      orderBy: { openedAt: 'desc' }
+    });
     
     res.json({ status: 'success', data: shift || null, message: 'Status shift berhasil diambil' });
   } catch (error) {
@@ -26,25 +33,32 @@ shiftsRouter.post('/open', authMiddleware, async (req: AuthRequest, res: Respons
   const userId = req.user?.id;
   const { opening_cash, notes } = req.body;
 
-  if (opening_cash === undefined) {
+  if (opening_cash === undefined || userId === undefined) {
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Modal awal wajib diisi' });
     return;
   }
 
   try {
     // Cek apakah sudah ada shift yang terbuka
-    const openShift = await db.prepare("SELECT id FROM cash_shifts WHERE user_id = ? AND status = 'open'").get(userId);
+    const openShift = await prisma.cashShift.findFirst({
+      where: { userId, status: 'open' }
+    });
+
     if (openShift) {
       res.status(400).json({ status: 'error', code: 'ALREADY_OPEN', message: 'Anda masih memiliki shift yang terbuka' });
       return;
     }
 
-    const info = await db.prepare(`
-      INSERT INTO cash_shifts (user_id, opening_cash, notes, status)
-      VALUES (?, ?, ?, 'open')
-    `).run(userId, opening_cash, notes || null);
+    const shift = await prisma.cashShift.create({
+      data: {
+        userId,
+        openingCash: opening_cash,
+        notes: notes || null,
+        status: 'open'
+      }
+    });
 
-    res.status(201).json({ status: 'success', data: { id: (info as any).lastInsertRowid }, message: 'Shift berhasil dibuka' });
+    res.status(201).json({ status: 'success', data: { id: shift.id }, message: 'Shift berhasil dibuka' });
   } catch (error: any) {
     console.error('Shift Open Error:', error.message || error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -56,32 +70,44 @@ shiftsRouter.post('/close', authMiddleware, async (req: AuthRequest, res: Respon
   const userId = req.user?.id;
   const { closing_cash, notes } = req.body;
 
-  if (closing_cash === undefined) {
+  if (closing_cash === undefined || userId === undefined) {
     res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Uang akhir wajib diisi' });
     return;
   }
 
   try {
-    const shift = await db.prepare("SELECT * FROM cash_shifts WHERE user_id = ? AND status = 'open'").get(userId) as any;
+    const shift = await prisma.cashShift.findFirst({
+      where: { userId, status: 'open' }
+    });
+
     if (!shift) {
       res.status(400).json({ status: 'error', code: 'NOT_FOUND', message: 'Tidak ada shift yang sedang terbuka' });
       return;
     }
 
     // Hitung system_cash: opening_cash + total sales dengan payment_method = 'cash' dalam shift ini
-    const salesSummary = await db.prepare(`
-      SELECT COALESCE(SUM(total), 0) as cash_total 
-      FROM sales 
-      WHERE shift_id = ? AND payment_method = 'cash' AND payment_status IN ('paid', 'partial')
-    `).get(shift.id) as any;
+    const salesSummary = await prisma.sale.aggregate({
+      _sum: { total: true },
+      where: {
+        shiftId: shift.id,
+        paymentMethod: 'cash',
+        paymentStatus: { in: ['paid', 'partial'] }
+      }
+    });
 
-    const systemCash = shift.opening_cash + salesSummary.cash_total;
+    const cashTotal = salesSummary._sum.total || 0;
+    const systemCash = shift.openingCash + cashTotal;
 
-    await db.prepare(`
-      UPDATE cash_shifts 
-      SET closed_at = CURRENT_TIMESTAMP, closing_cash = ?, system_cash = ?, notes = ?, status = 'closed'
-      WHERE id = ?
-    `).run(closing_cash, systemCash, notes || shift.notes, shift.id);
+    await prisma.cashShift.update({
+      where: { id: shift.id },
+      data: {
+        closedAt: new Date(),
+        closingCash: closing_cash,
+        systemCash: systemCash,
+        notes: notes || shift.notes,
+        status: 'closed'
+      }
+    });
 
     res.json({ status: 'success', data: { system_cash: systemCash }, message: 'Shift berhasil ditutup' });
   } catch (error: any) {
@@ -93,13 +119,22 @@ shiftsRouter.post('/close', authMiddleware, async (req: AuthRequest, res: Respon
 // GET /api/shifts - Riwayat shift (admin/owner)
 shiftsRouter.get('/', authMiddleware, roleGuard(['admin', 'owner']), async (req: AuthRequest, res: Response) => {
   try {
-    const shifts = await db.prepare(`
-      SELECT cs.*, u.username as cashier_name 
-      FROM cash_shifts cs
-      JOIN users u ON cs.user_id = u.id
-      ORDER BY cs.opened_at DESC
-    `).all();
-    res.json({ status: 'success', data: shifts, message: 'Riwayat shift berhasil diambil' });
+    const shifts = await prisma.cashShift.findMany({
+      include: {
+        user: {
+          select: { username: true }
+        }
+      },
+      orderBy: { openedAt: 'desc' }
+    });
+
+    // Format for frontend compatibility
+    const formattedShifts = shifts.map(s => ({
+      ...s,
+      cashier_name: s.user.username
+    }));
+
+    res.json({ status: 'success', data: formattedShifts, message: 'Riwayat shift berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -110,41 +145,59 @@ shiftsRouter.get('/', authMiddleware, roleGuard(['admin', 'owner']), async (req:
 shiftsRouter.get('/:id/report', authMiddleware, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
-    const shift = await db.prepare(`
-      SELECT cs.*, u.username as cashier_name 
-      FROM cash_shifts cs
-      JOIN users u ON cs.user_id = u.id
-      WHERE cs.id = ?
-    `).get(id) as any;
+    const shiftId = parseInt(id);
+    const shift = await prisma.cashShift.findUnique({
+      where: { id: shiftId },
+      include: {
+        user: { select: { username: true } }
+      }
+    });
 
     if (!shift) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Shift tidak ditemukan' });
       return;
     }
 
-    const summary = await db.prepare(`
-      SELECT 
-        payment_method,
-        COUNT(id) as transactions,
-        SUM(total) as revenue
-      FROM sales
-      WHERE shift_id = ? AND payment_status IN ('paid', 'partial')
-      GROUP BY payment_method
-    `).all(id) as any[];
+    // Manual sum for summary to match previous format
+    const summaryRaw = await prisma.sale.groupBy({
+      by: ['paymentMethod'],
+      _count: { id: true },
+      _sum: { total: true },
+      where: {
+        shiftId: shiftId,
+        paymentStatus: { in: ['paid', 'partial'] }
+      }
+    });
 
-    const transactions = await db.prepare(`
-      SELECT id, invoice_number, total, payment_method, created_at 
-      FROM sales 
-      WHERE shift_id = ? 
-      ORDER BY created_at DESC
-    `).all(id);
+    const summary = summaryRaw.map(s => ({
+      payment_method: s.paymentMethod,
+      transactions: s._count.id,
+      revenue: s._sum.total || 0
+    }));
+
+    const transactions = await prisma.sale.findMany({
+      where: { shiftId: shiftId },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        total: true,
+        paymentMethod: true,
+        createdAt: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
     res.json({
       status: 'success',
       data: {
-        shift,
+        shift: { ...shift, cashier_name: shift.user.username },
         summary,
-        transactions
+        transactions: transactions.map(t => ({
+          ...t,
+          invoice_number: t.invoiceNumber,
+          payment_method: t.paymentMethod,
+          created_at: t.createdAt
+        }))
       },
       message: 'Laporan shift berhasil diambil'
     });
@@ -153,4 +206,5 @@ shiftsRouter.get('/:id/report', authMiddleware, async (req: AuthRequest, res: Re
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+
 

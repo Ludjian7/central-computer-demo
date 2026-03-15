@@ -1,43 +1,46 @@
 import { Router, Response } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth.js';
 
 export const servicesRouter = Router();
 
 // GET /api/services - Daftar layanan/servis
 servicesRouter.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const { status, technician_id, start_date, end_date } = req.query;
+  const { status, technician_id, start_date, end_date } = req.query as any;
 
   try {
-    let query = `
-      SELECT si.id, si.sale_id, si.product_name, si.service_schedule, si.service_status, si.notes, si.service_technician,
-             s.invoice_number, s.customer_name, s.customer_phone,
-             u.username as technician_name
-      FROM sale_items si
-      JOIN sales s ON si.sale_id = s.id
-      JOIN products p ON si.product_id = p.id
-      LEFT JOIN users u ON si.service_technician = u.id
-      WHERE p.type = 'service'
-    `;
-    const params: any[] = [];
+    const where: any = {
+      product: { type: 'service' }
+    };
 
-    if (status) {
-      query += ' AND si.service_status = ?';
-      params.push(status);
-    }
-    if (technician_id) {
-      query += ' AND si.service_technician = ?';
-      params.push(technician_id);
-    }
+    if (status) where.serviceStatus = status;
+    if (technician_id) where.serviceTechnician = parseInt(technician_id);
     if (start_date && end_date) {
-      query += ' AND date(si.service_schedule) BETWEEN ? AND ?';
-      params.push(start_date, end_date);
+      where.serviceSchedule = {
+        gte: new Date(`${start_date}T00:00:00.000Z`),
+        lte: new Date(`${end_date}T23:59:59.999Z`)
+      };
     }
 
-    query += ' ORDER BY si.service_schedule ASC';
+    const services = await prisma.saleItem.findMany({
+      where,
+      include: {
+        sale: { select: { invoiceNumber: true, customerName: true, customerPhone: true } },
+        technician: { select: { username: true } }
+      },
+      orderBy: { serviceSchedule: 'asc' }
+    });
 
-    const services = await db.prepare(query).all(...params);
-    res.json({ status: 'success', data: services, message: 'Daftar layanan berhasil diambil' });
+    // Format for frontend
+    const formattedServices = services.map(si => ({
+      ...si,
+      invoice_number: si.sale.invoiceNumber,
+      customer_name: si.sale.customerName,
+      customer_phone: si.sale.customerPhone,
+      technician_name: si.technician?.username || null
+    }));
+
+    res.json({ status: 'success', data: formattedServices, message: 'Daftar layanan berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -56,15 +59,18 @@ servicesRouter.patch('/:id/status', authMiddleware, async (req: AuthRequest, res
   }
 
   try {
-    // Cek apakah user adalah admin/owner ATAU teknisi yang ditugaskan
-    const serviceItem = await db.prepare('SELECT service_technician FROM sale_items WHERE id = ?').get(id) as any;
+    const serviceId = parseInt(id);
+    const serviceItem = await prisma.saleItem.findUnique({
+      where: { id: serviceId },
+      select: { serviceTechnician: true }
+    });
     
     if (!serviceItem) {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Layanan tidak ditemukan' });
       return;
     }
 
-    if (user?.role !== 'admin' && user?.role !== 'owner' && serviceItem.service_technician !== user?.id) {
+    if (user?.role !== 'admin' && user?.role !== 'owner' && serviceItem.serviceTechnician !== user?.id) {
       res.status(403).json({ 
         status: 'error', 
         code: 'FORBIDDEN', 
@@ -73,7 +79,10 @@ servicesRouter.patch('/:id/status', authMiddleware, async (req: AuthRequest, res
       return;
     }
 
-    const info = await db.prepare('UPDATE sale_items SET service_status = ? WHERE id = ?').run(status, id);
+    await prisma.saleItem.update({
+      where: { id: serviceId },
+      data: { serviceStatus: status }
+    });
     
     res.json({ status: 'success', data: null, message: 'Status layanan berhasil diupdate' });
   } catch (error) {
@@ -93,24 +102,32 @@ servicesRouter.patch('/:id/technician', authMiddleware, roleGuard(['admin', 'own
   }
 
   try {
+    const techId = parseInt(technician_id);
+    const serviceId = parseInt(id);
+
     // Verifikasi teknisi ada dan aktif
-    const tech = await db.prepare('SELECT id FROM users WHERE id = ? AND is_active = 1').get(technician_id);
+    const tech = await prisma.user.findFirst({
+      where: { id: techId, isActive: true }
+    });
     if (!tech) {
       res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: 'Teknisi tidak ditemukan atau tidak aktif' });
       return;
     }
 
-    const info = await db.prepare('UPDATE sale_items SET service_technician = ? WHERE id = ?').run(technician_id, id);
-    
-    if ((info as any).changes === 0) {
+    await prisma.saleItem.update({
+      where: { id: serviceId },
+      data: { serviceTechnician: techId }
+    });
+
+    res.json({ status: 'success', data: null, message: 'Teknisi berhasil ditugaskan' });
+  } catch (error: any) {
+    if (error.code === 'P2025') {
       res.status(404).json({ status: 'error', code: 'NOT_FOUND', message: 'Layanan tidak ditemukan' });
       return;
     }
-
-    res.json({ status: 'success', data: null, message: 'Teknisi berhasil ditugaskan' });
-  } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
   }
 });
+
 

@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { db } from '../db/index.js';
+import { prisma } from '../db/index.js';
 import { AuthRequest } from './auth.js';
 
 export const activityLogger = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -22,14 +22,19 @@ export const activityLogger = (req: AuthRequest, res: Response, next: NextFuncti
       }
 
       // Jalankan asinkron tanpa menunggu, agar tidak memperlambat respon user
-      db.prepare(`
-        INSERT INTO activity_logs (user_id, method, endpoint, summary, ip_address)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(userId, method, endpoint, summary, ipAddress)
-      .catch((err: any) => console.error('Activity Log Error:', err));
+      prisma.activityLog.create({
+        data: {
+          userId,
+          method,
+          endpoint,
+          summary,
+          ipAddress
+        }
+      }).catch((err: any) => console.error('Activity Log Error:', err));
 
       return res.send(body);
     };
   }
   next();
 };
+

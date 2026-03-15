@@ -54,9 +54,17 @@ const COLORS = ['#4f46e5', '#f97316'];
 export default function Dashboard() {
   const { user } = useAuth();
   
+  // Calculate 30 days ago for the trend chart
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const startDateStr = thirtyDaysAgo.toISOString().split('T')[0];
+
   // Data Fetching
   const { data: summary, isLoading: isLoadingSummary } = useReportsSummary();
-  const { data: trendData, isLoading: isLoadingTrend } = useReportsSalesTrend({ period: 'daily' });
+  const { data: trendData, isLoading: isLoadingTrend } = useReportsSalesTrend({ 
+    period: 'daily',
+    start_date: startDateStr
+  });
   const { data: topProducts, isLoading: isLoadingTop } = useTopProducts({ limit: 4 });
   const { data: techPerformance, isLoading: isLoadingTech } = useTechnicianPerformance();
   const { data: lowStock, isLoading: isLoadingLowStock } = useLowStockReport();
@@ -90,7 +98,8 @@ export default function Dashboard() {
   ];
   const totalRevenueSplit = (summary?.product_revenue || 0) + (summary?.service_revenue || 0);
 
-  const targetPercentage = summary?.monthly_target ? Math.min((summary?.total_revenue / summary?.monthly_target) * 100, 100) : 0;
+  const targetPercentage = summary?.monthly_target ? (summary?.total_revenue / summary?.monthly_target) * 100 : 0;
+  const progressWidth = Math.min(targetPercentage, 100);
 
   return (
     <div className="space-y-6 pb-8">
@@ -119,7 +128,7 @@ export default function Dashboard() {
       >
         {/* Total Pendapatan + Growth */}
         <MetricCard 
-          title="Total Pendapatan" 
+          title="Pendapatan Bulan Ini" 
           value={formatCurrency(summary?.total_revenue)} 
           icon={<DollarSign size={24} className="text-[#52c46a]" />}
           trend={`${Math.abs(summary?.revenue_growth_pct || 0)}% dari bulan lalu`}
@@ -128,7 +137,7 @@ export default function Dashboard() {
         />
         {/* Total Transaksi + Growth */}
         <MetricCard 
-          title="Total Transaksi" 
+          title="Transaksi Bulan Ini" 
           value={String(summary?.total_transactions || 0)} 
           icon={<ShoppingCart size={24} className="text-blue-500" />}
           trend={`${Math.abs(summary?.transactions_growth_pct || 0)}% dari bulan lalu`}
@@ -137,7 +146,7 @@ export default function Dashboard() {
         />
         {/* Servis Aktif + Completion Rate */}
         <MetricCard 
-          title="Servis Aktif / Berjalan" 
+          title="Servis Berjalan" 
           value={String(summary?.active_services || 0)} 
           icon={<Wrench size={24} className="text-indigo-500" />}
           trend={`${summary?.service_completion_rate || 0}% Completion Rate`}
@@ -263,7 +272,7 @@ export default function Dashboard() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-[10px] text-gray-400 font-medium">Bulan Ini</span>
                   <span className="text-sm font-bold text-gray-800">
-                    {summary?.product_revenue ? Math.round((summary.product_revenue / totalRevenueSplit)*100) : 0}% P
+                    {summary?.product_revenue ? Math.round((summary.product_revenue / totalRevenueSplit)*100) : 0}% Produk
                   </span>
                 </div>
               )}
@@ -296,7 +305,7 @@ export default function Dashboard() {
               <div className="w-full bg-white/10 rounded-full h-2.5 mb-2 overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
-                  animate={{ width: `${targetPercentage}%` }}
+                  animate={{ width: `${progressWidth}%` }}
                   transition={{ duration: 1, delay: 0.5 }}
                   className="bg-gradient-to-r from-indigo-400 to-[#52c46a] h-full rounded-full"
                 ></motion.div>
