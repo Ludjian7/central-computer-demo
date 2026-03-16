@@ -4,8 +4,8 @@
 > penjualan (POS), stok, servis teknisi, pengadaan barang, dan laporan
 > keuangan — semua dalam satu platform terintegrasi.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Tersedia-brightgreen)](https://your-demo-url.com)
-[![Video Demo](https://img.shields.io/badge/Video%20Demo-YouTube-red)](https://youtube.com/your-video-link)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Tersedia-brightgreen)](https://central-computer-demo.vercel.app)
+[![Video Demo](https://img.shields.io/badge/Video%20Demo-YouTube-red)](https://youtube.com)
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 ---
@@ -30,6 +30,7 @@ untuk mencatat penjualan dan stok. Pendekatan ini menimbulkan beberapa masalah n
 
 ### 💰 Point of Sale (POS) — *Meja Kasir Digital*
 - Antarmuka kasir yang cepat: cari produk, tambah ke keranjang, checkout dalam hitungan detik
+- Mendukung Input **Nama Pelanggan (Opsional)** pada struk tagihan
 - Mendukung 5 metode pembayaran: Tunai, Transfer, QRIS, Debit, Kredit
 - Kode diskon/promo langsung bisa divalidasi saat checkout
 - Stok barang berkurang **otomatis** setiap ada transaksi
@@ -71,7 +72,7 @@ untuk mencatat penjualan dan stok. Pendekatan ini menimbulkan beberapa masalah n
 
 ## 🚀 Coba Langsung (Demo)
 
-**🔗 Live Demo:** [central-computer-demo.railway.app](https://your-demo.railway.app)
+**🔗 Live Demo:** [central-computer-demo.vercel.app](https://central-computer-demo.vercel.app)
 
 | Akun | Username | Password | Akses |
 |---|---|---|---|
@@ -89,16 +90,20 @@ untuk mencatat penjualan dan stok. Pendekatan ini menimbulkan beberapa masalah n
 
 ```bash
 # 1. Clone repositori
-git clone https://github.com/username/central-computer.git
-cd central-computer
+git clone https://github.com/yaris/central-computer-demo.git
+cd central-computer-demo
 
 # 2. Install dependensi
 npm install
 
-# 3. Salin file konfigurasi
+# 3. Salin file konfigurasi & Isi URL Database Postgres
 cp .env.example .env
 
-# 4. Jalankan aplikasi
+# 4. Sinkronisasi Prisma ke Database
+npx prisma generate
+npx prisma db push
+
+# 5. Jalankan aplikasi
 npm run dev
 ```
 
@@ -147,9 +152,9 @@ Central Computer
 
 **Frontend:** React 19, React Router v7, TanStack React Query v5, Tailwind CSS v4, Recharts, Lucide Icons
 
-**Backend:** Node.js, Express.js, TypeScript
+**Backend:** Node.js, Express.js (Vercel Serverless), Prisma ORM, TypeScript
 
-**Database:** SQLite (`better-sqlite3`) dengan 15 tabel
+**Database:** PostgreSQL (Neon Serverless) dengan 15 tabel terelasi
 
 **Autentikasi:** JWT (JSON Web Token) + bcrypt password hashing
 
