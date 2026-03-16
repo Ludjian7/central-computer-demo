@@ -139,6 +139,7 @@ export default function POS() {
     }));
 
     createSale.mutate({
+      customer_name: 'Umum',
       items,
       total_amount: grandTotal,
       tax_amount: tax,
