@@ -27,6 +27,7 @@ export default function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'barang' | 'jasa'>('all');
+  const [customerName, setCustomerName] = useState('');
   
   // API requests
   const apiType = filterType === 'all' ? undefined : (filterType === 'barang' ? 'physical' : 'service');
@@ -139,7 +140,7 @@ export default function POS() {
     }));
 
     createSale.mutate({
-      customer_name: 'Umum',
+      customer_name: customerName.trim() || 'Umum',
       items,
       total_amount: grandTotal,
       tax_amount: tax,
@@ -166,6 +167,7 @@ export default function POS() {
     setCreatedSaleId(null);
     setAppliedDiscount(null);
     setVoucherCode('');
+    setCustomerName('');
   };
 
   return (
@@ -432,6 +434,17 @@ export default function POS() {
                   <div className="absolute top-0 right-0 -mt-8 -mr-8 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl"></div>
                   <p className="text-gray-300 text-sm mb-1 relative z-10">Total Tagihan</p>
                   <p className="text-4xl font-bold font-mono relative z-10">{formatCurrency(grandTotal)}</p>
+                </div>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nama Pelanggan (Opsional)</label>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Contoh: Budi / Umum"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#52c46a]/20 focus:border-[#52c46a] transition-all font-medium"
+                  />
                 </div>
 
                 <div className="mb-6">
