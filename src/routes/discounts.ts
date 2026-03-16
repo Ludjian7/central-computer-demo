@@ -110,7 +110,7 @@ discountsRouter.post('/validate', authMiddleware, async (req: AuthRequest, res: 
       res.status(400).json({ 
         status: 'error', 
         code: 'MIN_PURCHASE_NOT_MET', 
-        message: `Minimal belanja untuk promo ini adalah Rp ${discount.minPurchase.toLocaleString('id-ID')}` 
+        message: `Minimal belanja untuk promo ini adalah Rp ${(discount.minPurchase || 0).toLocaleString('id-ID')}` 
       });
       return;
     }

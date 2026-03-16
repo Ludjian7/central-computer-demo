@@ -140,7 +140,7 @@ export default function ReturnModal({ saleId, isOpen, onClose }: ReturnModalProp
                <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 flex justify-between items-center text-sm">
                  <span className="text-orange-800 font-medium">Est. Refund:</span>
                  <span className="font-bold text-orange-700 font-mono">
-                    Rp {((selectedItem.price - (selectedItem.discount || 0)) * returnQty).toLocaleString('id-ID')}
+                    Rp {(((selectedItem.price - (selectedItem.discount || 0)) * returnQty) || 0).toLocaleString('id-ID')}
                  </span>
                </div>
             )}

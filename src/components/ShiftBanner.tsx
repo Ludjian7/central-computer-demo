@@ -27,7 +27,7 @@ export const ShiftBanner: React.FC = () => {
               </div>
               <div className="flex items-center gap-1.5 opacity-90">
                 <Wallet className="w-4 h-4" />
-                <span>Modal Awal: Rp {shift.opening_cash.toLocaleString('id-ID')}</span>
+                <span>Modal Awal: Rp {(shift.opening_cash || 0).toLocaleString('id-ID')}</span>
               </div>
             </>
           ) : (
@@ -167,11 +167,11 @@ const CloseShiftModal: React.FC<CloseShiftModalProps> = ({ shift, onClose }) => 
           <div className="bg-indigo-50 p-4 rounded-lg space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">Terbuka Sejak:</span>
-              <span className="font-medium">{new Date(shift.opened_at).toLocaleString('id-ID')}</span>
+              <span className="font-medium">{shift.opened_at ? new Date(shift.opened_at).toLocaleString('id-ID') : '-'}</span>
             </div>
             <div className="flex justify-between text-sm border-t border-indigo-100 pt-2">
               <span className="text-slate-600">Modal Awal:</span>
-              <span className="font-medium text-indigo-700">Rp {shift.opening_cash.toLocaleString('id-ID')}</span>
+              <span className="font-medium text-indigo-700">Rp {(shift.opening_cash || 0).toLocaleString('id-ID')}</span>
             </div>
           </div>
 

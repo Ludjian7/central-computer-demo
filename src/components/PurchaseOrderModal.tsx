@@ -225,7 +225,7 @@ export default function PurchaseOrderModal({ isOpen, onClose, prefillProductId }
           <div className="mt-8 flex items-center justify-between border-t pt-6">
             <div className="text-right">
               <p className="text-sm text-gray-500">Estimasi Total Pembelian</p>
-              <p className="text-2xl font-bold text-gray-900">Rp {totalAmount.toLocaleString()}</p>
+              <p className="text-2xl font-bold text-gray-900">Rp {(totalAmount || 0).toLocaleString()}</p>
             </div>
             <div className="flex gap-3">
               <button

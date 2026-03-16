@@ -25,7 +25,7 @@ export default function InvoicePrintModal({ saleId, onClose }: InvoicePrintModal
   };
 
   const formatCurrency = (amount: number) => {
-    return `Rp ${amount.toLocaleString('id-ID')}`;
+    return `Rp ${(amount || 0).toLocaleString('id-ID')}`;
   };
 
   return (

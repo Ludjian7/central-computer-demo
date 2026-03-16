@@ -122,7 +122,7 @@ export default function PurchaseOrders() {
                       <p className="text-xs text-gray-500">Oleh: {po.created_by_name}</p>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <p className="font-bold text-gray-900">Rp {po.total_amount.toLocaleString()}</p>
+                      <p className="font-bold text-gray-900">Rp {(po.total_amount || 0).toLocaleString()}</p>
                     </td>
                     <td className="px-6 py-4">
                       {getStatusBadge(po.status)}
