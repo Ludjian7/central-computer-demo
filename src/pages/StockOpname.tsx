@@ -11,6 +11,13 @@ export default function StockOpname() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newOpnameNotes, setNewOpnameNotes] = useState('');
 
+  const safeFormatDate = (dateString: any) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    return format(date, 'dd MMMM yyyy', { locale: idLocale });
+  };
+
   const { data: opnames, isLoading: isLoadingList } = useStockOpnames();
   const { data: detail, isLoading: isLoadingDetail } = useStockOpnameDetail(selectedOpnameId);
   
@@ -78,7 +85,7 @@ export default function StockOpname() {
               {opnames?.map((op: any) => (
                 <tr key={op.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedOpnameId(op.id)}>
                   <td className="px-6 py-4 text-sm text-gray-600">
-                    {format(new Date(op.opname_date), 'dd MMMM yyyy', { locale: idLocale })}
+                    {safeFormatDate(op.opname_date)}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{op.notes || '-'}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{op.creator_name}</td>
@@ -119,7 +126,7 @@ export default function StockOpname() {
             </button>
             <div className="flex-1">
               <h2 className="font-bold text-gray-800">
-                Opname: {format(new Date(detail?.opname_date || new Date()), 'dd MMMM yyyy', { locale: idLocale })}
+                Opname: {safeFormatDate(detail?.opname_date || new Date())}
               </h2>
               <p className="text-sm text-gray-500">{detail?.notes || 'Tidak ada catatan'}</p>
             </div>
