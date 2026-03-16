@@ -47,7 +47,7 @@ export default function App() {
               {/* Protected Routes with Layout */}
               <Route element={<ProtectedRoute />}>
                 <Route element={<Layout />}>
-                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/dashboard" element={<ProtectedRoute allowedRoles={['admin', 'owner']}><Dashboard /></ProtectedRoute>} />
                   <Route path="/pos" element={<ProtectedRoute allowedRoles={['admin', 'owner', 'karyawan']}><POS /></ProtectedRoute>} />
                   <Route path="/services" element={<ProtectedRoute allowedRoles={['admin', 'owner', 'karyawan']}><Services /></ProtectedRoute>} />
                   <Route path="/products" element={<ProtectedRoute allowedRoles={['admin', 'owner']}><Products /></ProtectedRoute>} />

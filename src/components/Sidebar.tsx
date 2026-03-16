@@ -14,7 +14,7 @@ export default function Sidebar() {
   const lowStockCount = lowStockItems?.length || 0;
 
   const menuItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'owner', 'karyawan'] },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'owner'] },
     { path: '/pos', icon: ShoppingCart, label: 'Point of Sales', roles: ['admin', 'owner', 'karyawan'] },
     { path: '/services', icon: Wrench, label: 'Servis & Jasa', roles: ['admin', 'owner', 'karyawan'] },
     { path: '/products', icon: Package, label: 'Produk', roles: ['admin', 'owner'], hasBadge: true },
