@@ -14,8 +14,10 @@ const formatCurrency = (value: number) => {
 
 const formatDate = (dateString: string) => {
   if (!dateString) return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '-';
   const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
-  return new Date(dateString).toLocaleDateString('id-ID', options);
+  return date.toLocaleDateString('id-ID', options);
 };
 
 export default function Returns() {

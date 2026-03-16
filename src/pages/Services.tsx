@@ -24,8 +24,10 @@ import { useServices, useUpdateServiceStatus, useAssignTechnician, useTechnician
 
 const formatDate = (dateString: string) => {
   if (!dateString) return '-';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '-';
   const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
-  return new Date(dateString).toLocaleDateString('id-ID', options);
+  return date.toLocaleDateString('id-ID', options);
 };
 
 const statusConfig: Record<string, any> = {

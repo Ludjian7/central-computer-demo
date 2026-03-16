@@ -76,6 +76,13 @@ export default function Dashboard() {
 
   const isLoading = isLoadingSummary || isLoadingTrend || isLoadingTop || isLoadingTech || isLoadingLowStock || isLoadingAging;
 
+  const safeFormatDate = (value: any, options: Intl.DateTimeFormatOptions) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('id-ID', options);
+  };
+
   // Animation variants
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -207,10 +214,7 @@ export default function Dashboard() {
                   tickLine={false} 
                   tick={{ fontSize: 12, fill: '#6b7280' }}
                   dy={10}
-                  tickFormatter={(value) => {
-                    const date = new Date(value);
-                    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-                  }}
+                  tickFormatter={(value) => safeFormatDate(value, { day: 'numeric', month: 'short' })}
                 />
                 <YAxis 
                   axisLine={false} 
@@ -220,10 +224,7 @@ export default function Dashboard() {
                   dx={-10}
                 />
                 <Tooltip 
-                  labelFormatter={(label) => {
-                    const date = new Date(label);
-                    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                  }}
+                  labelFormatter={(label) => safeFormatDate(label, { day: 'numeric', month: 'long', year: 'numeric' })}
                   formatter={(value: number) => [formatCurrency(value), 'Pendapatan']}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
