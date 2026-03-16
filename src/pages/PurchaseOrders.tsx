@@ -29,6 +29,20 @@ export default function PurchaseOrders() {
   const { data: pos, isLoading } = usePurchaseOrders(statusFilter ? { status: statusFilter } : {});
   const updateStatus = useUpdatePOStatus();
 
+  const safeFormatDate = (dateString: string) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    return format(date, 'dd/MM/yyyy');
+  };
+
+  const safeFormatDateTime = (dateString: string) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    return format(date, 'dd MMM yyyy HH:mm', { locale: id });
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'draft':
@@ -115,7 +129,7 @@ export default function PurchaseOrders() {
                   <tr key={po.id} className="group hover:bg-gray-50/50">
                     <td className="px-6 py-4">
                       <p className="font-mono font-bold text-indigo-700">{po.po_number}</p>
-                      <p className="text-xs text-gray-400">{format(new Date(po.created_at), 'dd MMM yyyy HH:mm', { locale: id })}</p>
+                      <p className="text-xs text-gray-400">{safeFormatDateTime(po.created_at)}</p>
                     </td>
                     <td className="px-6 py-4">
                       <p className="font-semibold text-gray-800">{po.supplier_name}</p>
@@ -131,12 +145,12 @@ export default function PurchaseOrders() {
                       <div className="flex flex-col gap-1 text-xs">
                          <div className="flex items-center gap-1.5 text-gray-500">
                             <Clock className="h-3 w-3" />
-                            <span>Ekspektasi: {po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy') : '-'}</span>
+                            <span>Ekspektasi: {safeFormatDate(po.expected_date)}</span>
                          </div>
                          {po.received_date && (
                            <div className="flex items-center gap-1.5 text-green-600 font-medium">
                               <PackageCheck className="h-3 w-3" />
-                              <span>Diterima: {format(new Date(po.received_date), 'dd/MM/yyyy')}</span>
+                              <span>Diterima: {safeFormatDate(po.received_date)}</span>
                            </div>
                          )}
                       </div>
