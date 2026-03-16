@@ -21,7 +21,17 @@ shiftsRouter.get('/current', authMiddleware, async (req: AuthRequest, res: Respo
       orderBy: { openedAt: 'desc' }
     });
     
-    res.json({ status: 'success', data: shift || null, message: 'Status shift berhasil diambil' });
+    const formattedShift = shift ? {
+      ...shift,
+      user_id: shift.userId,
+      opened_at: shift.openedAt,
+      closed_at: shift.closedAt,
+      opening_cash: shift.openingCash,
+      closing_cash: shift.closingCash,
+      system_cash: shift.systemCash
+    } : null;
+
+    res.json({ status: 'success', data: formattedShift, message: 'Status shift berhasil diambil' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Terjadi kesalahan server' });
@@ -131,6 +141,12 @@ shiftsRouter.get('/', authMiddleware, roleGuard(['admin', 'owner']), async (req:
     // Format for frontend compatibility
     const formattedShifts = shifts.map(s => ({
       ...s,
+      user_id: s.userId,
+      opened_at: s.openedAt,
+      closed_at: s.closedAt,
+      opening_cash: s.openingCash,
+      closing_cash: s.closingCash,
+      system_cash: s.systemCash,
       cashier_name: s.user.username
     }));
 
@@ -190,7 +206,16 @@ shiftsRouter.get('/:id/report', authMiddleware, async (req: AuthRequest, res: Re
     res.json({
       status: 'success',
       data: {
-        shift: { ...shift, cashier_name: shift.user.username },
+        shift: { 
+          ...shift, 
+          user_id: shift.userId,
+          opened_at: shift.openedAt,
+          closed_at: shift.closedAt,
+          opening_cash: shift.openingCash,
+          closing_cash: shift.closingCash,
+          system_cash: shift.systemCash,
+          cashier_name: shift.user.username 
+        },
         summary,
         transactions: transactions.map(t => ({
           ...t,

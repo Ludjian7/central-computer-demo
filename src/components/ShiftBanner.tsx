@@ -23,7 +23,7 @@ export const ShiftBanner: React.FC = () => {
             <>
               <div className="flex items-center gap-1.5 font-medium">
                 <Clock className="w-4 h-4" />
-                <span>Shift Aktif: {new Date(shift.opened_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>Shift Aktif: {shift.opened_at ? new Date(shift.opened_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}</span>
               </div>
               <div className="flex items-center gap-1.5 opacity-90">
                 <Wallet className="w-4 h-4" />
