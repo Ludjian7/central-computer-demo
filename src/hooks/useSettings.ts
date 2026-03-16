@@ -35,6 +35,7 @@ export function useUpdateSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
       addToast('Pengaturan berhasil diperbarui', 'success');
     },
     onError: (error: any) => {
