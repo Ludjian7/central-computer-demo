@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, QrCode, X, CheckCircle2, Receipt } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, QrCode, X, CheckCircle2, Receipt, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useProducts } from '../hooks/useProducts';
 import { useCreateSale } from '../hooks/useSales';
 import { useValidateDiscount } from '../hooks/useDiscounts';
@@ -96,11 +97,7 @@ export default function POS() {
   };
 
   const handleCheckout = () => {
-    if (cart.length === 0) return;
-    if (!activeShift) {
-      showToast('Anda harus membuka shift kasir terlebih dahulu!', 'error');
-      return;
-    }
+    if (cart.length === 0 || !activeShift) return;
     setIsPaymentModalOpen(true);
     setAmountTendered(grandTotal); // Default to exact amount
   };
@@ -387,7 +384,7 @@ export default function POS() {
           
           <button 
             onClick={handleCheckout}
-            disabled={cart.length === 0 || createSale.isPending}
+            disabled={cart.length === 0 || !activeShift || createSale.isPending}
             className="w-full bg-[#1a2b4c] hover:bg-[#111c33] disabled:bg-gray-300 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg transition-colors shadow-sm flex items-center justify-center gap-2"
           >
             {createSale.isPending ? (
@@ -399,6 +396,18 @@ export default function POS() {
                 </>
             )}
           </button>
+          
+          {!activeShift && (
+            <div className="flex items-center gap-2 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs">
+              <AlertTriangle size={16} className="shrink-0" />
+              <p>
+                Shift kasir belum dibuka.{' '}
+                <Link to="/shifts" className="font-bold underline hover:text-amber-900 transition-colors">
+                  Buka Shift →
+                </Link>
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
