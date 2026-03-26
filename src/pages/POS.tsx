@@ -6,6 +6,7 @@ import { useProducts } from '../hooks/useProducts';
 import { useCreateSale } from '../hooks/useSales';
 import { useValidateDiscount } from '../hooks/useDiscounts';
 import { useCurrentShift } from '../hooks/useShifts';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import InvoicePrintModal from '../components/InvoicePrintModal';
 import { Tag as TagIcon } from 'lucide-react';
@@ -49,6 +50,7 @@ export default function POS() {
   const [voucherCode, setVoucherCode] = useState('');
   const [appliedDiscount, setAppliedDiscount] = useState<any>(null);
   const [isVoucherLoading, setIsVoucherLoading] = useState(false);
+  const { user } = useAuth();
   const { showToast } = useToast();
 
   // Filtered Products
@@ -400,12 +402,18 @@ export default function POS() {
           {!activeShift && (
             <div className="flex items-center gap-2 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs">
               <AlertTriangle size={16} className="shrink-0" />
-              <p>
-                Shift kasir belum dibuka.{' '}
-                <Link to="/shifts" className="font-bold underline hover:text-amber-900 transition-colors">
-                  Buka Shift →
-                </Link>
-              </p>
+              {user?.role === 'karyawan' ? (
+                <p>
+                  Shift kasir belum dibuka.{' '}
+                  <Link to="/shifts" className="font-bold underline hover:text-amber-900 transition-colors">
+                    Buka Shift →
+                  </Link>
+                </p>
+              ) : (
+                <p>
+                  Untuk transaksi kasir, silakan login dengan akun <span className="font-bold">Karyawan</span>.
+                </p>
+              )}
             </div>
           )}
         </div>
