@@ -129,37 +129,8 @@ export default function Login() {
           <img 
             src="/logo.png" 
             alt="Central Computer Store Langsa" 
-            className="w-full max-w-[220px] object-contain"
-            onError={(e) => {
-              // Fallback if logo.png is not found
-              const target = e.target as HTMLImageElement;
-              target.style.display = 'none';
-              target.nextElementSibling?.classList.remove('hidden');
-            }}
+            className="w-full max-w-[260px] object-contain drop-shadow-sm"
           />
-          <div className="hidden flex-col items-center justify-center text-center">
-            <div className="flex items-end justify-center mb-4">
-              {/* Left side building */}
-              <svg width="80" height="100" viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M0 40L80 0V100H0V40Z" fill="#1b5e3a"/>
-                <rect x="10" y="60" width="60" height="40" fill="#1b5e3a" stroke="white" strokeWidth="2"/>
-                <rect x="15" y="65" width="50" height="15" fill="#e88124"/>
-              </svg>
-              {/* Right side circuit */}
-              <svg width="80" height="100" viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M0 0L80 40V100H0V0Z" fill="none" stroke="#e88124" strokeWidth="4"/>
-                <circle cx="40" cy="50" r="5" fill="#1b5e3a"/>
-                <path d="M40 50H60V70" stroke="#1b5e3a" strokeWidth="3" fill="none"/>
-              </svg>
-            </div>
-            <h2 className="text-[#1b5e3a] text-xl font-bold tracking-tight">CENTRAL COMPUTER</h2>
-            <div className="flex items-center gap-2 my-1">
-              <div className="h-[1px] w-8 bg-gray-300"></div>
-              <p className="text-[#e88124] text-[10px] font-semibold tracking-widest">COMPUTER STORE</p>
-              <div className="h-[1px] w-8 bg-gray-300"></div>
-            </div>
-            <h3 className="text-[#1b5e3a] text-sm font-bold tracking-widest mt-1">LANGSA</h3>
-          </div>
         </div>
 
       </div>
