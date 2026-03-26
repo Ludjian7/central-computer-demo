@@ -171,10 +171,10 @@ export default function POS() {
   };
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col lg:flex-row gap-6">
+    <div className="min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-8rem)] flex flex-col lg:flex-row gap-6">
       
       {/* Left Pane: Products Selection */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Kasir (POS)</h1>
           <p className="text-gray-500 mt-1">Pilih produk atau jasa untuk ditambahkan ke keranjang.</p>
@@ -210,7 +210,7 @@ export default function POS() {
         </div>
 
         {/* Product Grid */}
-        <div className="flex-1 overflow-y-auto pr-2 pb-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto pr-2 pb-2 custom-scrollbar max-h-[50vh] lg:max-h-none">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
             {isLoading ? (
                <div className="col-span-full py-12 flex justify-center items-center text-gray-400">
@@ -264,7 +264,7 @@ export default function POS() {
       </div>
 
       {/* Right Pane: Cart */}
-      <div className="w-full lg:w-96 bg-white rounded-3xl shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden shrink-0">
+      <div className="w-full lg:w-96 bg-white rounded-3xl shadow-sm border border-gray-100 flex flex-col lg:h-full overflow-hidden shrink-0">
         <div className="p-6 border-b border-gray-100 bg-gray-50/50">
           <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <ShoppingCart size={20} className="text-[#52c46a]" />
