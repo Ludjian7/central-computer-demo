@@ -32,7 +32,7 @@ export default function Sidebar() {
   const filteredMenu = menuItems.filter(item => user && item.roles.includes(user.role));
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 bg-[#1a2b4c] text-white h-full shrink-0 relative overflow-hidden">
+    <aside className="flex flex-col w-64 bg-[#1a2b4c] text-white h-full shrink-0 relative overflow-hidden">
       {/* Decorative background elements */}
       <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-5 rounded-full blur-3xl"></div>
       <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-64 h-64 bg-[#52c46a] opacity-10 rounded-full blur-[100px]"></div>
