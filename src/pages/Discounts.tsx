@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
 import { useDiscounts, useCreateDiscount, useToggleDiscount, Discount } from '../hooks/useDiscounts';
 import { Plus, Tag, Calendar, CheckCircle2, XCircle, Search, Percent, Banknote } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { id } from 'date-fns/locale';
+
+const safeFormatDate = (dateValue: any, fmt: string = 'd MMM yyyy'): string => {
+  if (!dateValue) return '-';
+  try {
+    const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
+    return isValid(date) ? format(date, fmt) : '-';
+  } catch {
+    return '-';
+  }
+};
 
 const Discounts: React.FC = () => {
   const { data: discounts, isLoading } = useDiscounts();
@@ -100,7 +110,7 @@ const Discounts: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-xs text-slate-600">
                       <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{format(new Date(discount.valid_from), 'd MMM yyyy')} - {format(new Date(discount.valid_until), 'd MMM yyyy')}</span>
+                      <span>{safeFormatDate(discount.valid_from)} - {safeFormatDate(discount.valid_until)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
