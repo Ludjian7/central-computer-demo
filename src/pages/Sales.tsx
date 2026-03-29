@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, FileText, CheckCircle2, AlertCircle, Clock, Download, Printer, RotateCcw } from 'lucide-react';
+import { Search, FileText, CheckCircle2, AlertCircle, Clock, Download, Printer, RotateCcw, Calendar, TrendingUp, HandCoins } from 'lucide-react';
 import { useSales, useUpdatePaymentStatus, useExportSalesCSV } from '../hooks/useSales';
+import { useAuth } from '../context/AuthContext';
 import InvoicePrintModal from '../components/InvoicePrintModal';
 import ReturnModal from '../components/ReturnModal';
 
@@ -29,24 +30,44 @@ const statusConfig: Record<string, any> = {
 };
 
 export default function Sales() {
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusTab, setStatusTab] = useState('all');
+  
+  // Setup default dates for today to ensure fast loading initially
+  const today = new Date();
+  // using localized offset to get right local day
+  const offsetMs = today.getTimezoneOffset() * 60 * 1000;
+  const localToday = new Date(today.getTime() - offsetMs);
+  const defaultDateStr = localToday.toISOString().split('T')[0];
+
+  const [startDate, setStartDate] = useState(defaultDateStr);
+  const [endDate, setEndDate] = useState(defaultDateStr);
+
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | string | null>(null);
   const [returnSaleId, setReturnSaleId] = useState<number | null>(null);
   
-  // Custom Hooks
-  const { data: sales = [], isLoading } = useSales();
+  // Fetch sales, passing date parameters to the backend
+  const { data: sales = [], isLoading } = useSales({ startDate, endDate });
   const updateStatus = useUpdatePaymentStatus();
   const { mutate: exportCSV, isPending: isExporting } = useExportSalesCSV();
 
   const filteredSales = useMemo(() => {
     return sales.filter((s: any) => {
       const q = searchTerm.toLowerCase();
-      return (
-        String(s.invoice_number).toLowerCase().includes(q) || 
-        String(s.customer_name).toLowerCase().includes(q)
-      );
+      const matchSearch = String(s.invoice_number).toLowerCase().includes(q) || 
+                          String(s.customer_name).toLowerCase().includes(q);
+      
+      const matchTab = statusTab === 'all' || s.payment_status === statusTab;
+      
+      // Frontend Date Filter Enforcement (fallback if backend ignores params)
+      const saleDateStr = new Date(s.created_at).toISOString().split('T')[0];
+      const matchStartDate = !startDate || saleDateStr >= startDate;
+      const matchEndDate = !endDate || saleDateStr <= endDate;
+
+      return matchSearch && matchTab && matchStartDate && matchEndDate;
     });
-  }, [sales, searchTerm]);
+  }, [sales, searchTerm, statusTab, startDate, endDate]);
 
   const handleStatusChange = (id: string, newStatus: string) => {
     if (window.confirm('Apakah Anda yakin ingin mengubah status pembayaran ini?')) {
@@ -55,11 +76,25 @@ export default function Sales() {
   };
 
   const handleExport = () => {
-    exportCSV({ q: searchTerm });
+    exportCSV({ q: searchTerm, startDate, endDate, status: statusTab !== 'all' ? statusTab : undefined });
   };
+
+  // Computations for Summary Cards
+  const totalPendapatan = filteredSales
+    .filter((s: any) => s.payment_status === 'paid' || s.payment_status === 'partial')
+    .reduce((sum: number, s: any) => sum + Number(s.total || 0), 0);
+    
+  const totalTransaksi = filteredSales.length;
+  
+  const totalPiutang = filteredSales
+    .filter((s: any) => s.payment_status === 'unpaid' || s.payment_status === 'partial')
+    .reduce((sum: number, s: any) => sum + Number(s.total || 0), 0);
+
+  const isAdminOrOwner = user?.role === 'admin' || user?.role === 'owner';
 
   return (
     <div className="space-y-6 pb-8">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Riwayat Penjualan</h1>
@@ -67,7 +102,7 @@ export default function Sales() {
         </div>
         <button 
           onClick={handleExport}
-          disabled={isExporting}
+          disabled={isExporting || filteredSales.length === 0}
           className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50"
         >
           <Download size={18} />
@@ -75,12 +110,96 @@ export default function Sales() {
         </button>
       </div>
 
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+          <div className="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center shrink-0">
+            <TrendingUp size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Pemasukan Kotor (Termasuk Utang)</p>
+            <h3 className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(totalPendapatan + (totalPiutang > 0 && totalPendapatan === 0 ? totalPiutang : 0))}</h3>
+          </div>
+        </motion.div>
+        
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
+            <FileText size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Total Transaksi</p>
+            <h3 className="text-xl font-bold text-gray-900 mt-1">{totalTransaksi} Invoice</h3>
+          </div>
+        </motion.div>
+
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+          <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
+            <HandCoins size={24} />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Potensi Piutang (Status Tertunda)</p>
+            <h3 className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(totalPiutang)}</h3>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Filters: Dates, Tabs, Search */}
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col space-y-4">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-gray-100 pb-4">
+          
+          {/* Tabs */}
+          <div className="flex overflow-x-auto pb-1 custom-scrollbar w-full lg:w-auto shrink-0 gap-2">
+            {[
+              { id: 'all', label: 'Semua Transaksi' },
+              { id: 'paid', label: 'Lunas' },
+              { id: 'partial', label: 'Parsial / Cicil' },
+              { id: 'unpaid', label: 'Belum Bayar' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setStatusTab(tab.id)}
+                className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition-colors ${
+                  statusTab === tab.id 
+                    ? 'bg-[#1a2b4c] text-white shadow-sm' 
+                    : 'text-gray-500 hover:bg-gray-50 border border-transparent hover:border-gray-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Date Range Selectors */}
+          <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 w-full lg:w-auto shrink-0">
+            <div className="flex items-center gap-2 px-3">
+              <Calendar size={16} className="text-gray-400" />
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-sm text-gray-700 font-medium outline-none cursor-pointer"
+                title="Tanggal Mulai"
+              />
+            </div>
+            <span className="text-gray-300 font-medium">-</span>
+            <div className="flex items-center gap-2 px-3">
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-sm text-gray-700 font-medium outline-none cursor-pointer"
+                title="Tanggal Akhir"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Search Input */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <input 
             type="text" 
-            placeholder="Cari invoice atau nama pelanggan..." 
+            placeholder="Cari nomor invoice atau nama pelanggan..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#52c46a]/20 focus:border-[#52c46a] transition-all"
@@ -88,6 +207,7 @@ export default function Sales() {
         </div>
       </div>
 
+      {/* Main Data Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto min-h-[400px]">
           <table className="w-full text-left border-collapse">
@@ -106,7 +226,7 @@ export default function Sales() {
               <AnimatePresence>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-400">
+                    <td colSpan={7} className="py-12 text-center text-gray-400">
                        <div className="flex justify-center items-center">
                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#52c46a] mr-3"></div>
                          Memuat data penjualan...
@@ -139,16 +259,23 @@ export default function Sales() {
                           )}
                         </td>
                         <td className="py-4 px-6">
-                            <select
-                                value={sale.payment_status}
-                                onChange={(e) => handleStatusChange(sale.id, e.target.value)}
-                                className={`text-xs font-medium pl-3 pr-8 py-1.5 rounded-lg border appearance-none focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-${statusInfo.color.split('-')[1]}-400 ${statusInfo.color} cursor-pointer transition-colors`}
-                                style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'right 0.2rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.5em 1.5em' }}
-                            >
-                                {Object.entries(statusConfig).map(([key, config]) => (
-                                    <option key={key} value={key}>{config.label}</option>
-                                ))}
-                            </select>
+                            {isAdminOrOwner ? (
+                              <select
+                                  value={sale.payment_status}
+                                  onChange={(e) => handleStatusChange(sale.id, e.target.value)}
+                                  className={`text-xs font-medium pl-3 pr-8 py-1.5 rounded-lg border appearance-none focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-${statusInfo.color.split('-')[1]}-400 ${statusInfo.color} cursor-pointer transition-colors`}
+                                  style={{ backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`, backgroundPosition: 'right 0.2rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.5em 1.5em' }}
+                              >
+                                  {Object.entries(statusConfig).map(([key, config]) => (
+                                      <option key={key} value={key}>{config.label}</option>
+                                  ))}
+                              </select>
+                            ) : (
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium ${statusInfo.color}`}>
+                                <StatusIcon size={14} />
+                                {statusInfo.label}
+                              </span>
+                            )}
                         </td>
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-2">
@@ -175,9 +302,15 @@ export default function Sales() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-gray-500">
+                    <td colSpan={7} className="py-12 text-center text-gray-500">
                       <FileText className="mx-auto h-12 w-12 text-gray-300 mb-3" />
-                      <p>Tidak ada riwayat penjualan.</p>
+                      <p>Tidak ada riwayat penjualan pada rentang tanggal ini.</p>
+                      <button 
+                         onClick={() => { setStartDate(''); setEndDate(''); setStatusTab('all'); setSearchTerm(''); }}
+                         className="mt-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg text-sm transition-colors"
+                      >
+                        Reset Filter
+                      </button>
                     </td>
                   </tr>
                 )}

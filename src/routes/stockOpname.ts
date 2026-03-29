@@ -17,7 +17,7 @@ stockOpnameRouter.get('/', authMiddleware, async (req: AuthRequest, res: Respons
     // Format for frontend
     const formattedList = list.map(so => ({
       ...so,
-      creator_name: so.creator.username
+      creator_name: so.creator?.username || 'System'
     }));
 
     res.json({ status: 'success', data: formattedList, message: 'Daftar opname berhasil diambil' });
@@ -99,12 +99,12 @@ stockOpnameRouter.get('/:id', authMiddleware, async (req: AuthRequest, res: Resp
     // Format for frontend
     const formattedData = {
       ...header,
-      creator_name: header.creator.username,
+      creator_name: header.creator?.username || 'System',
       items: header.items.map(i => ({
         ...i,
-        product_name: i.product.name,
-        product_sku: i.product.sku,
-        category: i.product.category
+        product_name: i.product?.name || 'Unknown Product',
+        product_sku: i.product?.sku || '-',
+        category: i.product?.category || 'Uncategorized'
       }))
     };
 
