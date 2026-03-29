@@ -55,24 +55,27 @@ stockOpnameRouter.post('/', authMiddleware, roleGuard(['admin', 'owner']), async
         }
       });
 
-      // 3. Insert items
-      for (const p of products) {
-        await tx.stockOpnameItem.create({
-          data: {
+      // 3. Insert items in bulk for performance (avoids serverless timeout)
+      if (products.length > 0) {
+        await tx.stockOpnameItem.createMany({
+          data: products.map(p => ({
             opnameId: header.id,
             productId: p.id,
             systemQty: p.quantity
-          }
+          }))
         });
       }
 
       return header.id;
+    }, {
+      maxWait: 10000,  // max time to acquire a connection
+      timeout: 30000,  // max time for the entire transaction
     });
 
     res.status(201).json({ status: 'success', data: { id: result }, message: 'Draft opname berhasil dibuat (snapshot stok selesai)' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: 'Gagal membuat draft opname' });
+  } catch (error: any) {
+    console.error('Stock Opname POST Error:', error);
+    res.status(500).json({ status: 'error', code: 'SERVER_ERROR', message: error.message || 'Gagal membuat draft opname' });
   }
 });
 
